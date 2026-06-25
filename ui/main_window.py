@@ -421,6 +421,8 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self._order_sub_btns):
             btn.setChecked(i == idx)
             btn.setStyleSheet(self._sub_tab_style(i == idx))
+        # Show Actions column only for Ongoing (idx 0), hide for Completed/Cancelled
+        self.orders_table.setColumnHidden(9, idx != 0)
         self._repopulate_orders_table()
 
     def _populate_orders(self, orders: list):
@@ -458,6 +460,7 @@ class MainWindow(QMainWindow):
             getattr(self, "_orders_cancelled", []),
         ]
         show_actions = (self._order_sub_tab == 0)  # only ongoing needs actions
+        self.orders_table.setColumnHidden(9, not show_actions)
         orders = buckets[self._order_sub_tab]
 
         # Update count label
@@ -738,16 +741,32 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", result.get("error", "Failed"))
 
     def _cancel_all_orders(self):
+        # Check if there are any ongoing orders to cancel
+        ongoing = getattr(self, "_orders_ongoing", [])
+        if not ongoing:
+            QMessageBox.information(
+                self, "No Open Orders",
+                "There are no open orders to cancel."
+            )
+            return
+
         reply = QMessageBox.question(
-            self, "Confirm", "Cancel ALL open orders?",
+            self, "Confirm",
+            f"Cancel ALL {len(ongoing)} open order(s)?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
             try:
                 APIClient.get()._mconnect.cancel_all()
                 self._refresh_data()
+                QMessageBox.information(self, "Done", "All open orders have been cancelled.")
             except Exception as e:
-                QMessageBox.warning(self, "Error", str(e))
+                err = str(e)
+                if "no open order" in err.lower() or "does not exist" in err.lower():
+                    QMessageBox.information(self, "No Open Orders",
+                                            "There are no open orders to cancel.")
+                else:
+                    QMessageBox.warning(self, "Error", err)
 
     def _on_order_placed(self, result: dict):
         if result["success"]:
