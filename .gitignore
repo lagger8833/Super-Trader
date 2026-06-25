@@ -1,0 +1,16 @@
+# Secrets — never commit these
+.env
+
+# Build output
+dist/
+build/
+*.spec.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# PyInstaller
+*.manifest

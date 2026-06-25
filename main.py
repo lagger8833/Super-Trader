@@ -15,7 +15,7 @@ from ui.login_window import LoginWindow
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("mStock Trader")
+    app.setApplicationName("Super Trader")
     app.setApplicationVersion("1.0.0")
     app.setStyle("Fusion")
 

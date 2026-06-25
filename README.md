@@ -43,7 +43,7 @@ build_windows.bat
 This will:
 1. Upgrade pip/setuptools
 2. Install all dependencies
-3. Build `dist\mStockTrader.exe` — a single portable executable
+3. Build `dist\SuperTrader.exe` — a single portable executable
 
 ---
 
@@ -61,7 +61,7 @@ TOTP Screen
 Main Dashboard
 ```
 
-Credentials are stored **encrypted** in `~/.mstock_trader/credentials.enc`
+Credentials are stored **encrypted** in `~/.super_trader/credentials.enc`
 using a machine-unique key derived via PBKDF2-HMAC-SHA256.
 
 ---
@@ -104,7 +104,7 @@ Then register it in `STRATEGY_MAP` inside `ui/algo_panel.py`.
 mstock_trader/
 ├── main.py                  # Entry point
 ├── requirements.txt
-├── mstock_trader.spec       # PyInstaller config
+├── super_trader.spec       # PyInstaller config
 ├── build_windows.bat        # One-click build script
 ├── core/
 │   ├── api_client.py        # MConnect wrapper
@@ -136,4 +136,4 @@ You'll need: **User ID**, **Password**, **API Key**.
   using PBKDF2-HMAC-SHA256 with 480,000 iterations
 - No credentials are transmitted anywhere other than the mStock API
 - Use "Logout" to clear the session (does NOT delete saved credentials)
-- To fully clear saved credentials, delete `~/.mstock_trader/`
+- To fully clear saved credentials, delete `~/.super_trader/`

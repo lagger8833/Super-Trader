@@ -52,7 +52,7 @@ class LoginWorker(QThread):
 class LoginWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("mStock Trader — Login")
+        self.setWindowTitle("Super Trader — Login")
         self.setMinimumSize(500, 550)
         self.setStyleSheet(STYLE)
         self._api_key  = ""
@@ -78,7 +78,7 @@ class LoginWindow(QMainWindow):
         # Title
         t = QLabel("📈 Super Trader", objectName="title")
         t.setAlignment(Qt.AlignCenter)
-        s = QLabel("Powered by mStock Trading API and LaggeR", objectName="sub")
+        s = QLabel("Powered by mStock Trading API", objectName="sub")
         s.setAlignment(Qt.AlignCenter)
         lay.addWidget(t)
         lay.addWidget(s)

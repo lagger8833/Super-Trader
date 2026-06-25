@@ -13,8 +13,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
-CREDS_FILE = Path.home() / ".mstock_trader" / "credentials.enc"
-SALT_FILE  = Path.home() / ".mstock_trader" / "salt.bin"
+CREDS_FILE = Path.home() / ".super_trader" / "credentials.enc"
+SALT_FILE  = Path.home() / ".super_trader" / "salt.bin"
 
 
 def _ensure_dir():

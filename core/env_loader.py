@@ -5,7 +5,7 @@ Loads credentials from a .env file.
 Search order:
   1. Same folder as the running EXE / main.py  (recommended)
   2. Current working directory
-  3. User home directory (~/.mstock_trader/.env)
+  3. User home directory (~/.super_trader/.env)
 
 .env format:
   API_KEY=your_api_key_here
@@ -31,7 +31,7 @@ def _find_env_file() -> Path | None:
     candidates = [
         _app_dir() / ".env",
         Path.cwd() / ".env",
-        Path.home() / ".mstock_trader" / ".env",
+        Path.home() / ".super_trader" / ".env",
     ]
     for p in candidates:
         if p.exists():

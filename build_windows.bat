@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  mStock Trader -- Windows Build Script
+REM  Super Trader -- Windows Build Script
 REM  Automatically installs Python if missing, then installs
 REM  all dependencies and builds a standalone EXE.
 REM  Run as Administrator for best results.
@@ -11,7 +11,7 @@ cd /d "%~dp0"
 
 echo.
 echo ============================================================
-echo   mStock Trader -- Build Setup
+echo   Super Trader -- Build Setup
 echo   Working directory: %~dp0
 echo ============================================================
 echo.
@@ -133,7 +133,7 @@ if errorlevel 1 (
 REM -- STEP 6: Build the EXE ------------------------------------
 echo.
 echo [6/6] Building standalone EXE with PyInstaller...
-pyinstaller "%~dp0mstock_trader.spec" --clean
+pyinstaller "%~dp0super_trader.spec" --clean
 if errorlevel 1 (
     echo.
     echo ERROR: PyInstaller build failed. See output above.
@@ -143,16 +143,16 @@ if errorlevel 1 (
 
 REM -- Result ---------------------------------------------------
 echo.
-if exist "%~dp0dist\mStockTrader.exe" (
+if exist "%~dp0dist\SuperTrader.exe" (
     REM FIX #1: copy EXE to project root for easy access
-    copy /Y "%~dp0dist\mStockTrader.exe" "%~dp0mStockTrader.exe" >nul
+    copy /Y "%~dp0dist\SuperTrader.exe" "%~dp0SuperTrader.exe" >nul
     echo ============================================================
     echo   SUCCESS!
     echo.
-    echo   EXE (dist folder) : %~dp0dist\mStockTrader.exe
-    echo   EXE (project root): %~dp0mStockTrader.exe  ^<-- easy access
+    echo   EXE (dist folder) : %~dp0dist\SuperTrader.exe
+    echo   EXE (project root): %~dp0SuperTrader.exe  ^<-- easy access
     echo.
-    echo   IMPORTANT: place your .env file next to mStockTrader.exe
+    echo   IMPORTANT: place your .env file next to SuperTrader.exe
     echo   before running it.  Copy .env.example ^-^> .env and fill in
     echo   your API_KEY.
     echo ============================================================

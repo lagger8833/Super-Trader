@@ -98,22 +98,8 @@ class DataWorker(QThread):
 
             if self.what in ("all", "funds"):
                 r = client.get_fund_summary()
-                # API returns data as a list of segment dicts (A, E, etc.)
-                # Flatten all segments into one dict by summing numeric fields
-                raw = r.get("data", {})
-                segments = raw if isinstance(raw, list) else (
-                    raw.get("data", []) if isinstance(raw, dict) else []
-                )
-                flat: dict = {}
-                for seg in (segments if isinstance(segments, list) else []):
-                    if isinstance(seg, dict):
-                        for k, v in seg.items():
-                            try:
-                                flat[k] = flat.get(k, 0.0) + float(v)
-                            except (TypeError, ValueError):
-                                if k not in flat:
-                                    flat[k] = v
-                self.funds_ready.emit(flat)
+                # Pass full raw result; _update_metrics handles all shapes
+                self.funds_ready.emit(r)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -131,7 +117,7 @@ class DataWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SuperTrader")
+        self.setWindowTitle("Super Trader")
         self.setMinimumSize(1100, 700)
         self.setStyleSheet(STYLE)
         self._holdings_data: list = []
@@ -180,7 +166,7 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(20, 0, 20, 0)
 
-        logo = QLabel("📈  mStock Trader")
+        logo = QLabel("📈  Super Trader")
         logo.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
         layout.addWidget(logo)
         layout.addStretch()
@@ -449,35 +435,82 @@ class MainWindow(QMainWindow):
             lambda: self.status_bar.showMessage("Last updated: just now  |  Auto-refresh: 60s"))
         self._worker.start()
 
-    def _update_metrics(self, funds: dict):
+    def _update_metrics(self, raw: dict):
         """
-        mStock fund summary API field names (UPPERCASE, from docs):
-          AVAILABLE_BALANCE  -> available cash
-          SUM_OF_ALL         -> total ledger value
-          REALISED_PROFITS   -> realised P&L
-          MTM_COMBINED       -> day mark-to-market P&L
+        Parse fund summary. Handles all SDK response shapes:
+
+        Shape A (our APIClient envelope):
+          {"success": True, "data": [{"AVAILABLE_BALANCE": "...", ...}, ...]}
+
+        Shape B (direct API, data is a list of segment dicts):
+          {"status": "success", "data": [{"AVAILABLE_BALANCE": ..., ...}]}
+
+        Shape C (data is a flat dict):
+          {"status": "success", "data": {"AVAILABLE_BALANCE": ..., ...}}
+
+        Official fields from mStock docs:
+          AVAILABLE_BALANCE  — cash available to trade
+          SUM_OF_ALL         — total account value
+          REALISED_PROFITS   — realised P&L
+          MTM_COMBINED       — day mark-to-market P&L
         """
-        def _f(val) -> float:
+        def _f(v) -> float:
             try:
-                return float(val or 0)
+                return float(v or 0)
             except (TypeError, ValueError):
                 return 0.0
 
-        cash  = _f(funds.get("AVAILABLE_BALANCE"))
-        total = _f(funds.get("SUM_OF_ALL"))
-        tpnl  = _f(funds.get("REALISED_PROFITS"))
-        dpnl  = _f(funds.get("MTM_COMBINED"))
+        # Unwrap envelope: our client adds {"success":..., "data":...}
+        if isinstance(raw, dict) and "success" in raw:
+            inner = raw.get("data", {})
+        elif isinstance(raw, dict) and "status" in raw:
+            inner = raw.get("data", {})
+        else:
+            inner = raw
 
-        self.metric_labels["portfolio_value"].setText(f"\u20b9{total:,.2f}")
-        self.metric_labels["day_pnl"].setText(f"\u20b9{dpnl:,.2f}")
-        self.metric_labels["total_pnl"].setText(f"\u20b9{tpnl:,.2f}")
-        self.metric_labels["available_cash"].setText(f"\u20b9{cash:,.2f}")
+        # Normalise inner into a list of segment dicts
+        if isinstance(inner, list):
+            segments = inner
+        elif isinstance(inner, dict):
+            nested = inner.get("data", inner)
+            segments = nested if isinstance(nested, list) else [nested]
+        else:
+            segments = []
+
+        # Flatten all segments (one per margin segment A/E/etc.) by summing numerics
+        flat: dict = {}
+        for seg in segments:
+            if not isinstance(seg, dict):
+                continue
+            for k, v in seg.items():
+                try:
+                    flat[k] = flat.get(k, 0.0) + float(v)
+                except (TypeError, ValueError):
+                    if k not in flat:
+                        flat[k] = v
+
+        # Extract values — try uppercase API names first, then lowercase fallbacks
+        def _pick(*keys) -> float:
+            for k in keys:
+                v = flat.get(k)
+                if v not in (None, "", 0, 0.0):
+                    return _f(v)
+            return 0.0
+
+        cash  = _pick("AVAILABLE_BALANCE",  "available_balance",  "available_cash",    "equity")
+        total = _pick("SUM_OF_ALL",          "sum_of_all",         "net_value",         "portfolio_value")
+        tpnl  = _pick("REALISED_PROFITS",    "realised_profits",   "realised_pnl",      "total_pnl")
+        dpnl  = _pick("MTM_COMBINED",        "mtm_combined",       "unrealised_profit", "day_pnl")
+
+        self.metric_labels["portfolio_value"].setText(f"₹{total:,.2f}")
+        self.metric_labels["day_pnl"].setText(f"₹{dpnl:,.2f}")
+        self.metric_labels["total_pnl"].setText(f"₹{tpnl:,.2f}")
+        self.metric_labels["available_cash"].setText(f"₹{cash:,.2f}")
 
         for key, val in (("day_pnl", dpnl), ("total_pnl", tpnl)):
             color = "#40CC70" if val >= 0 else "#FF5555"
             self.metric_labels[key].setStyleSheet(
                 f"font-size:15px;font-weight:bold;color:{color};")
-
 
     # ──────────────────────────────────────
     # Actions

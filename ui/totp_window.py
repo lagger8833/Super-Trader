@@ -115,7 +115,7 @@ class TOTPWindow(QMainWindow):
         self._resend_timer   = QTimer(self)
         self._resend_timer.timeout.connect(self._tick_resend)
 
-        self.setWindowTitle("mStock Trader — Verify")
+        self.setWindowTitle("Super Trader — Verify")
         self.setMinimumSize(500, 520)
         self.setStyleSheet(STYLE)
         self._build_ui()
