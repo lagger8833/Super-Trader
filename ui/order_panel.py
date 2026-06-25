@@ -111,6 +111,10 @@ class OrderPanel(QWidget):
         sym_lay.addWidget(self.ltp_badge)
         form.addRow("Symbol *", sym_row)
 
+        sym_hint = QLabel("NSE: INFY  |  BSE: INFY-EQ or YESBANK-EQ")
+        sym_hint.setStyleSheet("color:#555570;font-size:10px;")
+        form.addRow("", sym_hint)
+
         # Exchange — re-trigger LTP on change
         self.exchange_combo = QComboBox()
         self.exchange_combo.addItems(["NSE", "BSE"])
@@ -365,7 +369,18 @@ class OrderPanel(QWidget):
     def _on_order_fail(self, error: str):
         self.submit_btn.setEnabled(True)
         self.submit_btn.setText("Place Order")
-        self._set_status(f"✗  {error}", error=True)
+
+        # Symbol format hint for BSE scrip errors
+        hint = ""
+        if "scrip" in error.lower() or "symbol" in error.lower() or "invalid" in error.lower():
+            sym = self.symbol_input.text().strip().upper()
+            exch = self.exchange_combo.currentText()
+            if exch == "BSE" and not sym.endswith("-EQ"):
+                hint = f"  Tip: BSE may need '{sym}-EQ' as the symbol"
+            elif exch == "NSE" and sym.endswith("-EQ"):
+                hint = f"  Tip: NSE uses '{sym[:-3]}' without the -EQ suffix"
+
+        self._set_status(f"✗  {error}{hint}", error=True)
         self.order_placed.emit({"success": False, "error": error})
 
     def _set_status(self, msg: str, error: bool = True):

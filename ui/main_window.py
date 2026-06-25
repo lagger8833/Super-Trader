@@ -318,8 +318,25 @@ class MainWindow(QMainWindow):
             t.setCellWidget(row, 9, action_widget)
 
     # ──────────────────────────────────────
-    # Orders Tab
+    # Orders Tab  (3 sub-tabs)
     # ──────────────────────────────────────
+
+    # Status classification
+    ONGOING_STATUSES   = {"OPEN", "PENDING", "O-PENDING", "OPEN PENDING",
+                          "TRIGGER PENDING", "AMO REQ RECEIVED"}
+    COMPLETED_STATUSES = {"COMPLETE", "EXECUTED", "FILLED"}
+    CANCELLED_STATUSES = {"CANCELLED", "REJECTED", "O-CANCELLED",
+                          "CANCEL PENDING", "CANCELLED AMO"}
+
+    STATUS_COLORS = {
+        "COMPLETE":        "#40CC70", "EXECUTED":       "#40CC70", "FILLED": "#40CC70",
+        "OPEN":            "#50A0FF", "PENDING":        "#50A0FF",
+        "O-PENDING":       "#50A0FF", "OPEN PENDING":   "#50A0FF",
+        "TRIGGER PENDING": "#FFB020", "AMO REQ RECEIVED": "#FFB020",
+        "REJECTED":        "#FF5555",
+        "CANCELLED":       "#888899", "O-CANCELLED":    "#888899",
+        "CANCEL PENDING":  "#888899", "CANCELLED AMO":  "#888899",
+    }
 
     def _build_orders_tab(self) -> QWidget:
         w = QWidget()
@@ -327,6 +344,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
+        # Header with Cancel All button
         hdr = QHBoxLayout()
         hdr.addWidget(QLabel("Order Book",
                              styleSheet="font-size:14px;font-weight:bold;color:#FFF;"))
@@ -337,40 +355,116 @@ class MainWindow(QMainWindow):
         hdr.addWidget(cancel_all_btn)
         layout.addLayout(hdr)
 
-        self.orders_table = QTableWidget()
-        cols = ["Order ID", "Symbol", "Exchange", "Type", "Side",
-                "Qty", "Price", "Status", "Product", "Actions"]
-        self.orders_table.setColumnCount(len(cols))
-        self.orders_table.setHorizontalHeaderLabels(cols)
-        self.orders_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.orders_table.horizontalHeader().setSectionResizeMode(9, QHeaderView.Fixed)
-        self.orders_table.setColumnWidth(9, 180)
-        self.orders_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.orders_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.orders_table.verticalHeader().setVisible(False)
-        self.orders_table.setAlternatingRowColors(True)
+        # Sub-tab bar styled as pill buttons
+        sub_tab_row = QHBoxLayout()
+        sub_tab_row.setSpacing(0)
+
+        self._order_sub_tab = 0   # 0=ongoing 1=completed 2=cancelled
+        self._order_sub_btns = []
+        for i, label in enumerate(["🟡  Ongoing", "✅  Completed", "🚫  Cancelled"]):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(i == 0)
+            btn.setMinimumHeight(34)
+            btn.setStyleSheet(self._sub_tab_style(i == 0))
+            btn.clicked.connect(lambda _, idx=i: self._switch_order_sub_tab(idx))
+            self._order_sub_btns.append(btn)
+            sub_tab_row.addWidget(btn)
+        sub_tab_row.addStretch()
+        layout.addLayout(sub_tab_row)
+
+        # Count badges
+        self._order_count_labels = {}
+        count_row = QHBoxLayout()
+        for key, label in [("ongoing", "Ongoing"), ("completed", "Completed"), ("cancelled", "Cancelled")]:
+            lbl = QLabel("0 orders")
+            lbl.setStyleSheet("color:#555570;font-size:11px;")
+            self._order_count_labels[key] = lbl
+        self._order_count_lbl = QLabel("0 orders")
+        self._order_count_lbl.setStyleSheet("color:#555570;font-size:11px;")
+        count_row.addWidget(self._order_count_lbl)
+        count_row.addStretch()
+        layout.addLayout(count_row)
+
+        # Single table — contents swapped on sub-tab change
+        self.orders_table = self._make_orders_table(show_actions=True)
         layout.addWidget(self.orders_table)
         return w
 
+    def _sub_tab_style(self, active: bool) -> str:
+        if active:
+            return ("background:#252545;color:#FFFFFF;border:1px solid #4060C8;"
+                    "border-bottom:2px solid #4060C8;font-weight:bold;font-size:12px;padding:6px 18px;")
+        return ("background:#1C1C2A;color:#888899;border:1px solid #252538;"
+                "font-size:12px;padding:6px 18px;")
+
+    def _make_orders_table(self, show_actions: bool) -> QTableWidget:
+        cols = ["Order ID", "Symbol", "Exchange", "Type", "Side",
+                "Qty", "Price", "Status", "Product"]
+        if show_actions:
+            cols.append("Actions")
+        t = QTableWidget()
+        t.setColumnCount(len(cols))
+        t.setHorizontalHeaderLabels(cols)
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        if show_actions:
+            t.horizontalHeader().setSectionResizeMode(9, QHeaderView.Fixed)
+            t.setColumnWidth(9, 180)
+        t.setSelectionBehavior(QTableWidget.SelectRows)
+        t.setEditTriggers(QTableWidget.NoEditTriggers)
+        t.verticalHeader().setVisible(False)
+        t.setAlternatingRowColors(True)
+        return t
+
+    def _switch_order_sub_tab(self, idx: int):
+        self._order_sub_tab = idx
+        for i, btn in enumerate(self._order_sub_btns):
+            btn.setChecked(i == idx)
+            btn.setStyleSheet(self._sub_tab_style(i == idx))
+        self._repopulate_orders_table()
+
     def _populate_orders(self, orders: list):
         self._orders_data = orders
+        # Pre-classify into buckets
+        self._orders_ongoing   = [o for o in orders
+            if (o.get("status") or "").upper().strip() in self.ONGOING_STATUSES]
+        self._orders_completed = [o for o in orders
+            if (o.get("status") or "").upper().strip() in self.COMPLETED_STATUSES]
+        self._orders_cancelled = [o for o in orders
+            if (o.get("status") or "").upper().strip() in self.CANCELLED_STATUSES]
+
+        # Update count label
+        counts = {
+            "ongoing":   len(self._orders_ongoing),
+            "completed": len(self._orders_completed),
+            "cancelled": len(self._orders_cancelled),
+        }
+        keys = ["ongoing", "completed", "cancelled"]
+        self._order_count_lbl.setText(
+            f"{counts[keys[self._order_sub_tab]]} orders"
+        )
+        # Update sub-tab button labels with counts
+        labels = ["🟡  Ongoing", "✅  Completed", "🚫  Cancelled"]
+        count_vals = [counts["ongoing"], counts["completed"], counts["cancelled"]]
+        for i, (btn, lbl, cnt) in enumerate(zip(self._order_sub_btns, labels, count_vals)):
+            btn.setText(f"{lbl}  ({cnt})")
+
+        self._repopulate_orders_table()
+
+    def _repopulate_orders_table(self):
+        buckets = [
+            getattr(self, "_orders_ongoing",   []),
+            getattr(self, "_orders_completed", []),
+            getattr(self, "_orders_cancelled", []),
+        ]
+        show_actions = (self._order_sub_tab == 0)  # only ongoing needs actions
+        orders = buckets[self._order_sub_tab]
+
+        # Update count label
+        self._order_count_lbl.setText(f"{len(orders)} orders")
+
         t = self.orders_table
         t.setRowCount(len(orders))
-
-        STATUS_COLORS = {
-            "COMPLETE":        "#40CC70", "EXECUTED":      "#40CC70",
-            "OPEN":            "#50A0FF", "PENDING":       "#50A0FF",
-            "O-PENDING":       "#50A0FF", "OPEN PENDING":  "#50A0FF",
-            "TRIGGER PENDING": "#FFB020",
-            "REJECTED":        "#FF5555", "CANCELLED":     "#888899",
-            "CANCEL PENDING":  "#888899",
-        }
-
-        # Statuses where Cancel and Modify are allowed
-        ACTIONABLE = {
-            "OPEN", "PENDING", "O-PENDING", "OPEN PENDING",
-            "TRIGGER PENDING", "AMO REQ RECEIVED",
-        }
 
         for row, o in enumerate(orders):
             order_id = o.get("order_id", "")
@@ -388,35 +482,38 @@ class MainWindow(QMainWindow):
                 item = QTableWidgetItem(str(val))
                 item.setTextAlignment(Qt.AlignCenter)
                 if col == 7:
-                    color = STATUS_COLORS.get(status, "#DCDCE6")
+                    color = self.STATUS_COLORS.get(status, "#DCDCE6")
                     item.setForeground(QBrush(QColor(color)))
                 if col == 4:
                     item.setForeground(QBrush(
                         QColor("#40CC70") if side == "BUY" else QColor("#FF5555")))
                 t.setItem(row, col, item)
 
-            # Actions — enabled only for actionable statuses
-            is_actionable = status in ACTIONABLE
-            action_widget = QWidget()
-            action_layout = QHBoxLayout(action_widget)
-            action_layout.setContentsMargins(4, 2, 4, 2)
-            action_layout.setSpacing(4)
+            # Actions column — only for ongoing orders
+            if show_actions and t.columnCount() > 9:
+                action_widget = QWidget()
+                action_layout = QHBoxLayout(action_widget)
+                action_layout.setContentsMargins(4, 2, 4, 2)
+                action_layout.setSpacing(4)
 
-            cancel_btn = QPushButton("Cancel")
-            cancel_btn.setMinimumWidth(65)
-            cancel_btn.setStyleSheet("background:#3A1515;color:#FF6060;font-size:11px;")
-            cancel_btn.setEnabled(is_actionable)
-            cancel_btn.clicked.connect(lambda _, oid=order_id: self._cancel_order(oid))
+                cancel_btn = QPushButton("Cancel")
+                cancel_btn.setMinimumWidth(65)
+                cancel_btn.setMinimumHeight(28)
+                cancel_btn.setStyleSheet("background:#3A1515;color:#FF6060;font-size:11px;padding:2px 6px;")
+                cancel_btn.clicked.connect(lambda _, oid=order_id: self._cancel_order(oid))
 
-            mod_btn = QPushButton("Modify")
-            mod_btn.setMinimumWidth(65)
-            mod_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;font-size:11px;")
-            mod_btn.setEnabled(is_actionable)
-            mod_btn.clicked.connect(lambda _, r=row: self._modify_order(r))
+                mod_btn = QPushButton("Modify")
+                mod_btn.setMinimumWidth(65)
+                mod_btn.setMinimumHeight(28)
+                mod_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;font-size:11px;padding:2px 6px;")
+                mod_btn.clicked.connect(lambda _, oid=order_id: self._modify_order_by_id(oid))
 
-            action_layout.addWidget(cancel_btn)
-            action_layout.addWidget(mod_btn)
-            t.setCellWidget(row, 9, action_widget)
+                action_layout.addWidget(cancel_btn)
+                action_layout.addWidget(mod_btn)
+                t.setRowHeight(row, 36)
+                t.setCellWidget(row, 9, action_widget)
+            else:
+                t.setRowHeight(row, 36)
 
     # ──────────────────────────────────────
     # Algo Engine Tab
@@ -609,6 +706,17 @@ class MainWindow(QMainWindow):
         if row >= len(self._orders_data):
             return
         o = self._orders_data[row]
+        from ui.modify_dialog import ModifyOrderDialog
+        dlg = ModifyOrderDialog(o, self)
+        if dlg.exec_():
+            self._refresh_data()
+
+    def _modify_order_by_id(self, order_id: str):
+        """Lookup order by ID — safe after table refresh unlike row index."""
+        o = next((x for x in self._orders_data
+                  if x.get("order_id") == order_id), None)
+        if o is None:
+            return
         from ui.modify_dialog import ModifyOrderDialog
         dlg = ModifyOrderDialog(o, self)
         if dlg.exec_():
