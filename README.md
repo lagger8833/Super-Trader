@@ -1,4 +1,4 @@
-# mStock Trader — Desktop Trading Platform
+# Super Trader — Desktop Trading Platform
 
 A full-featured desktop trading platform built on the **mStock Trading API (Type A)**,
 packaged as a standalone Windows EXE.
