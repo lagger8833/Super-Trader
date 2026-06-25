@@ -252,45 +252,72 @@ class APIClient:
     def is_logged_in(self) -> bool:
         return self._logged_in
 
-    # ── Fund Summary (direct REST, guaranteed auth header) ────
+    # ── Fund Summary ──────────────────────────────────────────
 
     def get_fund_summary(self) -> dict:
         """
-        Doc: GET /openapi/typea/user/fundsummary
-        Headers: Authorization: token api_key:access_token
-        Response: {"status":"success","data":[{"AVAILABLE_BALANCE":"...","SUM_OF_ALL":"...",...}]}
-        data is a LIST of segment dicts with UPPERCASE keys.
+        Doc: GET https://api.mstock.trade/openapi/typea/user/fundsummary
+        Required headers:
+            X-Mirae-Version: 1
+            Authorization: token <api_key>:<access_token>
 
-        We call this directly via requests (not SDK) to guarantee the
-        Authorization header is exactly 'token api_key:access_token'.
+        We ALWAYS call this endpoint directly via requests — never via the SDK.
+        The SDK has a known issue (GitHub #26) where it sends:
+            Authorization: token <access_token>   (missing api_key prefix)
+        instead of the documented format:
+            Authorization: token <api_key>:<access_token>
+
+        Expected response:
+            {
+              "status": "success",
+              "data": [
+                {
+                  "AVAILABLE_BALANCE": "150000.00",
+                  "SUM_OF_ALL": "500000.00",
+                  "REALISED_PROFITS": "0",
+                  "MTM_COMBINED": "2500.75",
+                  "SEG": "A",
+                  ...
+                }
+              ]
+            }
         """
-        try:
-            # First try SDK method (in case it has the header right)
-            resp = self._mconnect.get_fund_summary()
-            data = _parse_response(resp)
+        url = f"{BASE_URL}/user/fundsummary"
+        headers = self._auth_headers()
 
-            # If SDK returned an auth error, retry with direct REST call
-            err = _check_body_error(data)
-            if err and ("token" in err.lower() or "auth" in err.lower()
-                        or "api" in err.lower() or "suspend" in err.lower()):
-                logger.warning("SDK fund_summary auth error, retrying with direct REST: %s", err)
-                data = self._direct_get("user/fundsummary")
+        logger.info("─" * 50)
+        logger.info("GET %s", url)
+        logger.info("Request headers: X-Mirae-Version=1, Authorization=token %s...:%s...",
+                    self._api_key[:6] if self._api_key else "MISSING",
+                    self._access_token[:16] if self._access_token else "MISSING")
+
+        try:
+            resp = self._session.get(url, headers=headers, timeout=15)
+
+            logger.info("Response HTTP status: %s", resp.status_code)
+            logger.info("Response body (first 800 chars): %s", resp.text[:800])
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            logger.info("Parsed JSON keys at root: %s", list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+            if isinstance(data, dict):
+                inner = data.get("data")
+                logger.info("data['data'] type: %s, value: %s",
+                            type(inner).__name__, str(inner)[:400])
 
             err = _check_body_error(data)
             if err:
+                logger.error("fund_summary API returned error: %s", err)
                 return {"success": False, "error": err, "data": {}}
 
+            logger.info("get_fund_summary() SUCCESS")
             return {"success": True, "data": data}
+
         except Exception as e:
-            logger.warning("SDK get_fund_summary() failed (%s), trying direct REST", e)
-            try:
-                data = self._direct_get("user/fundsummary")
-                err = _check_body_error(data)
-                if err:
-                    return {"success": False, "error": err, "data": {}}
-                return {"success": True, "data": data}
-            except Exception as e2:
-                return {"success": False, "error": str(e2), "data": {}}
+            logger.error("get_fund_summary() FAILED — %s: %s",
+                         type(e).__name__, e)
+            return {"success": False, "error": str(e), "data": {}}
 
     def _direct_get(self, path: str) -> dict:
         """Make a direct GET request with the correct Authorization header."""

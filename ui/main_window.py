@@ -98,8 +98,16 @@ class DataWorker(QThread):
 
             if self.what in ("all", "funds"):
                 r = client.get_fund_summary()
-                # Pass full raw result; _update_metrics handles all shapes
-                self.funds_ready.emit(r)
+                import logging as _log
+                _log.getLogger(__name__).info(
+                    "get_fund_summary() raw: %s", str(r)[:600]
+                )
+                if not r.get("success"):
+                    self.error.emit(
+                        f"Fund summary failed: {r.get('error', 'unknown')}"
+                    )
+                else:
+                    self.funds_ready.emit(r)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -174,6 +182,11 @@ class MainWindow(QMainWindow):
         refresh_btn = QPushButton("⟳  Refresh")
         refresh_btn.clicked.connect(self._refresh_data)
         layout.addWidget(refresh_btn)
+
+        log_btn = QPushButton("📋  View Logs")
+        log_btn.setStyleSheet("background-color: #1A2A3A; color: #5090CC; border-color: #2A4060;")
+        log_btn.clicked.connect(self._open_log_file)
+        layout.addWidget(log_btn)
 
         logout_btn = QPushButton("Logout")
         logout_btn.setStyleSheet(
@@ -489,29 +502,51 @@ class MainWindow(QMainWindow):
                     if k not in flat:
                         flat[k] = v
 
-        # Extract values — try uppercase API names first, then lowercase fallbacks
-        def _pick(*keys) -> float:
+        import logging as _log
+        _log.getLogger(__name__).info("fund flat keys: %s", list(flat.keys()))
+
+        # No data at all — API call failed or returned empty
+        if not flat:
+            for lbl in self.metric_labels.values():
+                lbl.setText("N/A")
+                lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#888899;")
+            return
+
+        # _pick returns (value, found) — lets us distinguish "0" from "missing"
+        def _pick(*keys):
             for k in keys:
-                v = flat.get(k)
-                if v not in (None, "", 0, 0.0):
-                    return _f(v)
-            return 0.0
+                if k in flat:
+                    try:
+                        return float(flat[k] or 0), True
+                    except (TypeError, ValueError):
+                        pass
+            return 0.0, False
 
-        cash  = _pick("AVAILABLE_BALANCE",  "available_balance",  "available_cash",    "equity")
-        total = _pick("SUM_OF_ALL",          "sum_of_all",         "net_value",         "portfolio_value")
-        tpnl  = _pick("REALISED_PROFITS",    "realised_profits",   "realised_pnl",      "total_pnl")
-        dpnl  = _pick("MTM_COMBINED",        "mtm_combined",       "unrealised_profit", "day_pnl")
+        cash,  cf = _pick("AVAILABLE_BALANCE",  "available_balance",  "available_cash")
+        total, tf = _pick("SUM_OF_ALL",          "sum_of_all",         "net_value")
+        tpnl,  pf = _pick("REALISED_PROFITS",    "realised_profits",   "realised_pnl")
+        dpnl,  df = _pick("MTM_COMBINED",        "mtm_combined",       "unrealised_profit")
 
-        self.metric_labels["portfolio_value"].setText(f"₹{total:,.2f}")
-        self.metric_labels["day_pnl"].setText(f"₹{dpnl:,.2f}")
-        self.metric_labels["total_pnl"].setText(f"₹{tpnl:,.2f}")
-        self.metric_labels["available_cash"].setText(f"₹{cash:,.2f}")
+        _log.getLogger(__name__).info(
+            "Metrics: cash=%.2f(found=%s) total=%.2f(found=%s) tpnl=%.2f(found=%s) dpnl=%.2f(found=%s)",
+            cash, cf, total, tf, tpnl, pf, dpnl, df
+        )
 
-        for key, val in (("day_pnl", dpnl), ("total_pnl", tpnl)):
-            color = "#40CC70" if val >= 0 else "#FF5555"
+        def _fmt(v, found):
+            return f"₹{v:,.2f}" if found else "N/A"
+
+        self.metric_labels["portfolio_value"].setText(_fmt(total, tf))
+        self.metric_labels["day_pnl"].setText(_fmt(dpnl, df))
+        self.metric_labels["total_pnl"].setText(_fmt(tpnl, pf))
+        self.metric_labels["available_cash"].setText(_fmt(cash, cf))
+
+        for key, val, found in (("day_pnl", dpnl, df), ("total_pnl", tpnl, pf)):
+            if found:
+                color = "#40CC70" if val >= 0 else "#FF5555"
+            else:
+                color = "#888899"
             self.metric_labels[key].setStyleSheet(
                 f"font-size:15px;font-weight:bold;color:{color};")
-
     # ──────────────────────────────────────
     # Actions
     # ──────────────────────────────────────
@@ -601,6 +636,40 @@ class MainWindow(QMainWindow):
             self._refresh_data()
         else:
             QMessageBox.warning(self, "Order Failed", result.get("error", "Unknown error"))
+
+    def _open_log_file(self):
+        """Open the log file in the system default text editor."""
+        import os, sys
+        from pathlib import Path
+
+        if getattr(sys, "frozen", False):
+            log_file = Path(sys.executable).parent / "super_trader.log"
+        else:
+            log_file = Path(__file__).resolve().parent.parent / "super_trader.log"
+
+        if not log_file.exists():
+            QMessageBox.information(
+                self, "Log File",
+                f"Log file not found yet at:\n{log_file}\n\n"
+                "It will be created when the app performs its first API call."
+            )
+            return
+
+        # Show path and open with system default
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(log_file))
+            elif sys.platform == "darwin":
+                os.system(f'open "{log_file}"')
+            else:
+                os.system(f'xdg-open "{log_file}"')
+        except Exception as e:
+            QMessageBox.information(
+                self, "Log File Location",
+                f"Log file is at:\n{log_file}\n\n"
+                f"Open it in any text editor (Notepad, VS Code, etc.)\n\n"
+                f"(Auto-open failed: {e})"
+            )
 
     def _logout(self):
         reply = QMessageBox.question(
