@@ -5,6 +5,7 @@ import sys
 import os
 import logging
 from pathlib import Path
+import urllib.request
 
 # Ensure app directory is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -61,12 +62,13 @@ def _setup_logging():
     ch.setLevel(logging.INFO)
     ch.setFormatter(fmt)
     root.addHandler(ch)
-
+    public_ip = urllib.request.urlopen("https://api.ipify.org", timeout=5).read().decode().strip()
     # Log the file path so the user knows where to find it
     logger = logging.getLogger(__name__)
     logger.info("=" * 60)
     logger.info("Super Trader starting")
     logger.info("Log file: %s", log_file)
+    logger.info("Current public IP: %s", public_ip)
     logger.info("=" * 60)
 
     return str(log_file)

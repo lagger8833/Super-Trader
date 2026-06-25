@@ -16,4 +16,4 @@ __pycache__/
 *.manifest
 
 #logs
-.log
+*.log

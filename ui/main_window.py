@@ -344,7 +344,7 @@ class MainWindow(QMainWindow):
         self.orders_table.setHorizontalHeaderLabels(cols)
         self.orders_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.orders_table.horizontalHeader().setSectionResizeMode(9, QHeaderView.Fixed)
-        self.orders_table.setColumnWidth(9, 160)
+        self.orders_table.setColumnWidth(9, 180)
         self.orders_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.orders_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.orders_table.verticalHeader().setVisible(False)
@@ -358,9 +358,18 @@ class MainWindow(QMainWindow):
         t.setRowCount(len(orders))
 
         STATUS_COLORS = {
-            "COMPLETE": "#40CC70", "EXECUTED": "#40CC70",
-            "OPEN": "#50A0FF",     "PENDING": "#50A0FF",
-            "REJECTED": "#FF5555", "CANCELLED": "#888899",
+            "COMPLETE":        "#40CC70", "EXECUTED":      "#40CC70",
+            "OPEN":            "#50A0FF", "PENDING":       "#50A0FF",
+            "O-PENDING":       "#50A0FF", "OPEN PENDING":  "#50A0FF",
+            "TRIGGER PENDING": "#FFB020",
+            "REJECTED":        "#FF5555", "CANCELLED":     "#888899",
+            "CANCEL PENDING":  "#888899",
+        }
+
+        # Statuses where Cancel and Modify are allowed
+        ACTIONABLE = {
+            "OPEN", "PENDING", "O-PENDING", "OPEN PENDING",
+            "TRIGGER PENDING", "AMO REQ RECEIVED",
         }
 
         for row, o in enumerate(orders):
@@ -371,7 +380,7 @@ class MainWindow(QMainWindow):
             side     = o.get("transaction_type", "")
             qty      = str(o.get("quantity", ""))
             price    = str(o.get("price", "0"))
-            status   = (o.get("status", "") or "").upper()
+            status   = (o.get("status", "") or "").upper().strip()
             product  = o.get("product", "")
 
             cells = [order_id, symbol, exchange, otype, side, qty, price, status, product]
@@ -386,22 +395,23 @@ class MainWindow(QMainWindow):
                         QColor("#40CC70") if side == "BUY" else QColor("#FF5555")))
                 t.setItem(row, col, item)
 
-            # Actions
+            # Actions — enabled only for actionable statuses
+            is_actionable = status in ACTIONABLE
             action_widget = QWidget()
             action_layout = QHBoxLayout(action_widget)
             action_layout.setContentsMargins(4, 2, 4, 2)
             action_layout.setSpacing(4)
 
             cancel_btn = QPushButton("Cancel")
-            cancel_btn.setFixedWidth(60)
+            cancel_btn.setMinimumWidth(65)
             cancel_btn.setStyleSheet("background:#3A1515;color:#FF6060;font-size:11px;")
-            cancel_btn.setEnabled(status in ("OPEN", "PENDING", "TRIGGER PENDING"))
+            cancel_btn.setEnabled(is_actionable)
             cancel_btn.clicked.connect(lambda _, oid=order_id: self._cancel_order(oid))
 
             mod_btn = QPushButton("Modify")
-            mod_btn.setFixedWidth(60)
+            mod_btn.setMinimumWidth(65)
             mod_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;font-size:11px;")
-            mod_btn.setEnabled(status in ("OPEN", "PENDING", "TRIGGER PENDING"))
+            mod_btn.setEnabled(is_actionable)
             mod_btn.clicked.connect(lambda _, r=row: self._modify_order(r))
 
             action_layout.addWidget(cancel_btn)
@@ -443,7 +453,7 @@ class MainWindow(QMainWindow):
         self._worker.holdings_ready.connect(self._populate_holdings)
         self._worker.orders_ready.connect(self._populate_orders)
         self._worker.funds_ready.connect(self._update_metrics)
-        self._worker.error.connect(lambda e: self.status_bar.showMessage(f"Error: {e}"))
+        self._worker.error.connect(self._on_data_error)
         self._worker.finished.connect(
             lambda: self.status_bar.showMessage("Last updated: just now  |  Auto-refresh: 60s"))
         self._worker.start()
@@ -636,6 +646,39 @@ class MainWindow(QMainWindow):
             self._refresh_data()
         else:
             QMessageBox.warning(self, "Order Failed", result.get("error", "Unknown error"))
+
+    def _on_data_error(self, error: str):
+        """Handle data fetch errors — show IP whitelist popup if that's the cause."""
+        self.status_bar.showMessage(f"Error: {error}")
+
+        if "ip address" in error.lower() or "ip" in error.lower() and "match" in error.lower():
+            # Fetch current public IP to show in the popup
+            try:
+                import urllib.request
+                current_ip = urllib.request.urlopen(
+                    "https://api.ipify.org", timeout=4
+                ).read().decode().strip()
+            except Exception:
+                current_ip = "Unable to detect — visit whatismyip.com"
+
+            QMessageBox.warning(
+                self,
+                "IP Address Not Whitelisted",
+                f"<b>mStock API Error:</b><br>"
+                f"Primary and Secondary IP Address are not matching "
+                f"with current IP address.<br><br>"
+                f"<b>Your current public IP:</b><br>"
+                f"<code style='font-size:14px;'>{current_ip}</code><br><br>"
+                f"<b>Steps to fix:</b><br>"
+                f"1. Go to <b>trade.mstock.com</b><br>"
+                f"2. Menu → Products → <b>Trading APIs</b><br>"
+                f"3. Click <b>API Settings</b><br>"
+                f"4. Add <b>{current_ip}</b> as Primary or Secondary IP<br>"
+                f"5. Save and restart Super Trader<br><br>"
+                f"<i>No API exists to update this automatically —<br>"
+                f"please contact the mStock team if the issue persists:<br>"
+                f"tradingapi@mstock.com</i>",
+            )
 
     def _open_log_file(self):
         """Open the log file in the system default text editor."""

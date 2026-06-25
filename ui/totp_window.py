@@ -5,7 +5,7 @@ Handles both SMS OTP (Path A) and Authenticator TOTP (Path B).
 """
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QFrame
+    QLineEdit, QPushButton, QFrame, QMessageBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 
@@ -110,7 +110,7 @@ class TOTPWindow(QMainWindow):
         self.user_id   = user_id
         self.password  = password
         self.api_key   = api_key
-        self._mode     = "otp"
+        self._mode     = "totp"
         self._resend_seconds = 0
         self._resend_timer   = QTimer(self)
         self._resend_timer.timeout.connect(self._tick_resend)
@@ -145,19 +145,23 @@ class TOTPWindow(QMainWindow):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # Mode toggle
-        toggle_row = QHBoxLayout()
-        toggle_row.setSpacing(10)
-        self.otp_btn  = QPushButton("📱  SMS OTP",             objectName="mode_btn")
-        self.totp_btn = QPushButton("🔑  Authenticator TOTP",  objectName="mode_btn")
-        self.otp_btn.setCheckable(True)
-        self.totp_btn.setCheckable(True)
-        self.otp_btn.setChecked(True)
-        self.otp_btn.clicked.connect(lambda: self._set_mode("otp"))
-        self.totp_btn.clicked.connect(lambda: self._set_mode("totp"))
-        toggle_row.addWidget(self.otp_btn)
-        toggle_row.addWidget(self.totp_btn)
-        layout.addLayout(toggle_row)
+        # Mode toggle — TOTP is default, SMS OTP is a small fallback link
+        self.sms_fallback_btn = QPushButton("Don't have TOTP? Use SMS OTP instead",
+                                            objectName="back_btn")
+        self.sms_fallback_btn.clicked.connect(lambda: self._set_mode("otp"))
+        layout.addWidget(self.sms_fallback_btn)
+
+        self.totp_fallback_btn = QPushButton("← Back to Authenticator TOTP",
+                                             objectName="back_btn")
+        self.totp_fallback_btn.clicked.connect(lambda: self._set_mode("totp"))
+        self.totp_fallback_btn.setVisible(False)
+        layout.addWidget(self.totp_fallback_btn)
+
+        # Hidden — kept for _set_mode compatibility
+        self.otp_btn  = QPushButton(objectName="mode_btn")
+        self.otp_btn.setVisible(False)
+        self.totp_btn = QPushButton(objectName="mode_btn")
+        self.totp_btn.setVisible(False)
 
         # Description
         self.desc_lbl = QLabel("", objectName="subtitle")
@@ -205,23 +209,24 @@ class TOTPWindow(QMainWindow):
 
         outer.addWidget(card)
 
-        self._set_mode("otp")
+        self._set_mode("totp")
         self.code_input.setFocus()
 
     # ── Mode toggle ────────────────────────────────────────────
 
     def _set_mode(self, mode: str):
         self._mode = mode
-        self.otp_btn.setChecked(mode == "otp")
-        self.totp_btn.setChecked(mode == "totp")
-        self.resend_btn.setVisible(mode == "otp")   # only OTP needs resend
+        self.resend_btn.setVisible(mode == "otp")
+        self.sms_fallback_btn.setVisible(mode == "totp")
+        self.totp_fallback_btn.setVisible(mode == "otp")
+        self.code_input.clear()
+        self.status_label.setText("")
 
         if mode == "otp":
             self.desc_lbl.setText(
                 "Enter the OTP sent to your registered mobile number after login."
             )
             self.hint_lbl.setText("Didn't receive it? Click Resend OTP below.")
-            # Start cooldown so Resend is active immediately on first load
             if self._resend_seconds == 0:
                 self._start_resend_cooldown()
         else:
@@ -315,10 +320,42 @@ class TOTPWindow(QMainWindow):
     def _on_failure(self, error: str):
         self.verify_btn.setEnabled(True)
         self.verify_btn.setText("Verify & Continue")
-        self.status_label.setStyleSheet("color:#FF6666;font-size:13px;")
-        self.status_label.setText(f"✗ {error}")
         self.code_input.clear()
         self.code_input.setFocus()
+
+        # IP whitelist error — show dedicated popup
+        if "ip address" in error.lower() or (
+                "ip" in error.lower() and "match" in error.lower()):
+            try:
+                import urllib.request
+                current_ip = urllib.request.urlopen(
+                    "https://api.ipify.org", timeout=4
+                ).read().decode().strip()
+            except Exception:
+                current_ip = "Unable to detect — visit whatismyip.com"
+
+            QMessageBox.warning(
+                self,
+                "IP Address Not Whitelisted",
+                f"<b>mStock blocked this request:</b><br>"
+                f"{error}<br><br>"
+                f"<b>Your current public IP:</b><br>"
+                f"<code style='font-size:14px;'>{current_ip}</code><br><br>"
+                f"<b>Steps to fix:</b><br>"
+                f"1. Go to <b>trade.mstock.com</b><br>"
+                f"2. Menu → Products → <b>Trading APIs</b><br>"
+                f"3. Click <b>API Settings</b><br>"
+                f"4. Add <b>{current_ip}</b> as Primary or Secondary IP<br>"
+                f"5. Save, then try again<br><br>"
+                f"<i>There is no API to update this automatically.<br>"
+                f"Contact mStock support if the issue persists:<br>"
+                f"<b>tradingapi@mstock.com</b></i>",
+            )
+            self.status_label.setStyleSheet("color:#FF8800;font-size:12px;")
+            self.status_label.setText("⚠ IP not whitelisted — see popup for steps")
+        else:
+            self.status_label.setStyleSheet("color:#FF6666;font-size:13px;")
+            self.status_label.setText(f"✗ {error}")
 
     def _back(self):
         self._resend_timer.stop()
