@@ -1,0 +1,40 @@
+# mStock Trader — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# mStock Trading API
+mStock-TradingApi-A
+
+# GUI framework
+PyQt5>=5.15.0
+
+# Encryption (credential storage)
+cryptography>=43.0.0
+
+# mStock API transitive dependencies (pinned for stability)
+attrs>=24.2.0
+autobahn>=24.4.2
+Automat>=24.8.1
+certifi>=2024.8.30
+cffi>=1.17.1
+charset-normalizer>=3.4.0
+colorama>=0.4.6
+constantly>=23.10.4
+hyperlink>=21.0.0
+idna>=3.10
+incremental>=24.7.2
+pyasn1>=0.6.1
+pyasn1-modules>=0.4.1
+pycparser>=2.22
+pyOpenSSL>=25.0.0
+PyYAML>=6.0.2
+requests>=2.32.3
+service-identity>=24.2.0
+six>=1.16.0
+Twisted>=24.7.0
+txaio>=23.1.1
+typing-extensions>=4.12.2
+urllib3>=2.2.3
+zope.interface>=7.1.0
+
+# Build tool (for creating the EXE)
+pyinstaller>=6.0.0
