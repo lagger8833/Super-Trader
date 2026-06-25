@@ -23,7 +23,7 @@ packaged as a standalone Windows EXE.
 
 ```bash
 # 1. Clone / download the project
-cd mstock_trader
+cd super_trader
 
 # 2. Install dependencies
 pip install -r requirements.txt
