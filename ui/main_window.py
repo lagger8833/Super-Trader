@@ -7,7 +7,8 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QSplitter,
-    QStatusBar, QFrame, QMessageBox, QApplication
+    QStatusBar, QFrame, QMessageBox, QApplication,
+    QGroupBox, QScrollArea, QFormLayout
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt5.QtGui import QColor, QFont, QBrush
@@ -165,7 +166,7 @@ class MainWindow(QMainWindow):
         # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Connected  |  Auto-refresh: 60s")
+        self.status_bar.showMessage("Connected  |  Auto-refresh: 15s")
 
     def _build_header(self) -> QWidget:
         header = QWidget()
@@ -194,6 +195,37 @@ class MainWindow(QMainWindow):
         logout_btn.clicked.connect(self._logout)
         layout.addWidget(logout_btn)
         return header
+
+    def _build_quick_ref(self, html: str) -> QWidget:
+        """
+        Permanent expanded right-sidebar quick reference.
+        Always visible, no toggle. Fixed width 220px.
+        """
+        sidebar = QGroupBox("ℹ  Quick Reference")
+        sidebar.setFixedWidth(220)
+        sidebar.setStyleSheet(
+            "QGroupBox{color:#5090CC;font-weight:bold;font-size:12px;"
+            "border:1px solid #252538;border-radius:6px;margin-top:8px;background:#0A0A14;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:10px;}"
+        )
+        vlay = QVBoxLayout(sidebar)
+        vlay.setContentsMargins(0, 4, 0, 4)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("background:transparent;")
+
+        lbl = QLabel(html)
+        lbl.setTextFormat(Qt.RichText)
+        lbl.setWordWrap(True)
+        lbl.setAlignment(Qt.AlignTop)
+        lbl.setContentsMargins(10, 6, 10, 6)
+        lbl.setStyleSheet("background:transparent;color:#AAAACC;font-size:11px;")
+        scroll.setWidget(lbl)
+        vlay.addWidget(scroll)
+        return sidebar
 
     def _build_metrics_strip(self) -> QWidget:
         strip = QWidget()
@@ -231,8 +263,14 @@ class MainWindow(QMainWindow):
 
     def _build_holdings_tab(self) -> QWidget:
         w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(16, 16, 16, 16)
+        outer = QHBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Main content
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(16, 16, 8, 16)
         layout.setSpacing(10)
 
         hdr = QHBoxLayout()
@@ -259,6 +297,26 @@ class MainWindow(QMainWindow):
         self.holdings_table.verticalHeader().setVisible(False)
         self.holdings_table.setAlternatingRowColors(True)
         layout.addWidget(self.holdings_table)
+
+        outer.addWidget(content, 1)
+        outer.addWidget(self._build_quick_ref(
+            "<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}"
+            "b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:11px;}</style>"
+            "<p class='h'>Column Meanings</p>"
+            "<b>Qty</b> — shares you hold<br>"
+            "<b>Avg Price</b> — average buy price<br>"
+            "<b>LTP</b> — last traded price<br>"
+            "<b>Current Value</b> — Qty × LTP<br>"
+            "<b>P&amp;L</b> — Current Value − Cost<br>"
+            "<b>P&amp;L %</b> — return percentage<br>"
+            "<p class='h'>Product</p>"
+            "<b>CNC</b> — delivery (overnight)<br>"
+            "<b>MIS</b> — intraday only<br>"
+            "<p class='h'>Actions</p>"
+            "<b>Sell</b> — market sell now<br>"
+            "<b>Modify</b> — custom sell order<br>"
+            "<b>Sell Selected</b> — sell highlighted rows"
+        ), 0)
         return w
 
     def _populate_holdings(self, holdings: list):
@@ -340,8 +398,12 @@ class MainWindow(QMainWindow):
 
     def _build_orders_tab(self) -> QWidget:
         w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(16, 16, 16, 16)
+        outer = QHBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(16, 16, 8, 16)
         layout.setSpacing(10)
 
         # Header with Cancel All button
@@ -389,6 +451,26 @@ class MainWindow(QMainWindow):
         # Single table — contents swapped on sub-tab change
         self.orders_table = self._make_orders_table(show_actions=True)
         layout.addWidget(self.orders_table)
+        outer.addWidget(content, 1)
+        outer.addWidget(self._build_quick_ref("""
+<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:11px;}</style>
+<p class="h">Statuses</p>
+<b>O-Pending</b> — sent to exchange<br>
+<b>Open</b> — live at exchange<br>
+<b>Trigger Pending</b> — SL awaiting trigger<br>
+<b>Complete</b> — fully filled<br>
+<b>O-Cancelled</b> — cancelled<br>
+<b>Rejected</b> — exchange rejected<br>
+<p class="h">Order Types</p>
+<b>MARKET</b> — best price now<br>
+<b>LIMIT</b> — your price or better<br>
+<b>SL</b> — stop-loss + limit<br>
+<b>SL-M</b> — stop-loss at market<br>
+<p class="h">Product</p>
+<b>CNC</b> — delivery (overnight)<br>
+<b>MIS</b> — intraday auto SQ-OFF<br>
+<b>NRML</b> — F&amp;O overnight
+"""), 0)
         return w
 
     def _sub_tab_style(self, active: bool) -> str:
@@ -524,14 +606,37 @@ class MainWindow(QMainWindow):
 
     def _build_algo_tab(self) -> QWidget:
         from ui.algo_panel import AlgoPanel
+        w = QWidget()
+        outer = QHBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
         self._algo_panel = AlgoPanel()
-        return self._algo_panel
+        outer.addWidget(self._algo_panel, 1)
+        outer.addWidget(self._build_quick_ref("""
+<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:11px;}</style>
+<p class="h">Strategies</p>
+<b>MA Crossover</b> — buy when short MA crosses above long MA<br>
+<b>RSI</b> — buy when oversold, sell when overbought<br>
+<b>Price Level</b> — buy/sell at specific price targets<br>
+<p class="h">Key Terms</p>
+<b>MA</b> — Moving Average<br>
+<b>RSI</b> — Relative Strength Index (0–100)<br>
+<b>Overbought</b> — RSI &gt; 70, possible pullback<br>
+<b>Oversold</b> — RSI &lt; 30, possible bounce<br>
+<b>Scan Interval</b> — check frequency (seconds)<br>
+<p class="h">Signal Colours</p>
+<b style="color:#50DD80;">Green</b> — BUY placed<br>
+<b style="color:#FF6060;">Red</b> — SELL placed<br>
+<b style="color:#FF8800;">Orange</b> — strategy error
+"""), 0)
+        return w
 
     # ──────────────────────────────────────
     # Place Order Tab
     # ──────────────────────────────────────
 
     def _build_place_order_tab(self) -> QWidget:
+        # OrderPanel has its own built-in quick reference sidebar
         from ui.order_panel import OrderPanel
         self._order_panel = OrderPanel()
         self._order_panel.order_placed.connect(self._on_order_placed)
@@ -545,7 +650,7 @@ class MainWindow(QMainWindow):
         self._refresh_data()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh_data)
-        self._timer.start(60_000)   # every 60 seconds
+        self._timer.start(15_000)   # every 15 seconds
 
     def _refresh_data(self):
         self.status_bar.showMessage("Refreshing data…")
@@ -555,7 +660,7 @@ class MainWindow(QMainWindow):
         self._worker.funds_ready.connect(self._update_metrics)
         self._worker.error.connect(self._on_data_error)
         self._worker.finished.connect(
-            lambda: self.status_bar.showMessage("Last updated: just now  |  Auto-refresh: 60s"))
+            lambda: self.status_bar.showMessage("Last updated: just now  |  Auto-refresh: 15s"))
         self._worker.start()
 
     def _update_metrics(self, raw: dict):

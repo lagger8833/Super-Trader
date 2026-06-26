@@ -312,10 +312,23 @@ class TOTPWindow(QMainWindow):
         self.verify_btn.setEnabled(True)
         self.verify_btn.setText("Verify & Continue")
 
-        from ui.main_window import MainWindow
-        self._main = MainWindow()
-        self._main.showMaximized()
-        self.close()
+        try:
+            from ui.main_window import MainWindow
+            self._main = MainWindow()
+            self._main.showMaximized()
+            self.close()
+        except Exception as exc:
+            import traceback as _tb, logging as _lg
+            _lg.getLogger(__name__).error(
+                "MainWindow launch crashed: %s -- %s",
+                exc, _tb.format_exc()
+            )
+            QMessageBox.critical(
+                self, "Startup Error",
+                "Dashboard failed to open:\n\n" + str(exc) +
+                "\n\nPlease check the log file for details."
+            )
+
 
     def _on_failure(self, error: str):
         self.verify_btn.setEnabled(True)

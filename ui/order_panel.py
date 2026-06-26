@@ -67,67 +67,118 @@ FNO_SEED = [
 
 class InstrumentLoader(QThread):
     """
-    Loads the full instrument CSV from mStock API.
-    GET /instruments/scriptmaster → CSV
-    Emits list of "exchange|symbol|display" strings for F&O instruments.
-    Falls back to FNO_SEED if the API fails.
+    Loads the full instrument CSV from:
+      GET https://api.mstock.trade/instruments/scriptmaster
+    Parses and emits:
+      equity_ready — list of "NSE|SYMBOL-EQ|SYMBOL-EQ" strings
+      fno_ready    — list of "NFO|NIFTY25JUN26FUT|display" strings
+    Falls back to static lists if API fails.
     """
-    fno_ready = pyqtSignal(list)   # list of "NFO|NIFTY25JUN26FUT|NIFTY Jun FUT"
+    fno_ready    = pyqtSignal(list)
+    equity_ready = pyqtSignal(list)
 
     def run(self):
+        import logging, requests as _req
+        log = logging.getLogger(__name__)
         try:
-            resp = APIClient.get()._mconnect.get_instruments()
-            # The SDK returns the CSV as a Response object or string
-            raw = resp.text if hasattr(resp, "text") else str(resp)
-            fno = self._parse_fno(raw)
-            if fno:
-                self.fno_ready.emit(fno)
-            else:
-                self.fno_ready.emit(FNO_SEED)
-        except Exception:
+            client = APIClient.get()
+            # Correct URL from mStock docs:
+            # GET https://api.mstock.trade/openapi/typea/instruments/scriptmaster
+            url = "https://api.mstock.trade/openapi/typea/instruments/scriptmaster"
+            log.info("InstrumentLoader: calling %s", url)
+            resp = _req.get(url, headers=client._auth_headers(), timeout=30)
+            log.info("InstrumentLoader: HTTP %s", resp.status_code)
+            resp.raise_for_status()
+            csv_text = resp.text
+            total_lines = len(csv_text.strip().splitlines())
+            log.info("Instrument scriptmaster: %d raw lines (including header)", total_lines)
+
+            equity, fno = self._parse(csv_text, log)
+            log.info("Parsed: %d equity instruments, %d F&O instruments",
+                     len(equity), len(fno))
+
+            self.equity_ready.emit(equity if equity else
+                                   [f"NSE|{s}|{s}" for s in EQUITY_STOCKS])
+            self.fno_ready.emit(fno if fno else FNO_SEED)
+
+        except Exception as e:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "InstrumentLoader failed (%s) — using static lists", e)
+            self.equity_ready.emit([f"NSE|{s}|{s}" for s in EQUITY_STOCKS])
             self.fno_ready.emit(FNO_SEED)
 
-    def _parse_fno(self, csv_text: str) -> list:
+    def _parse(self, csv_text: str, log) -> tuple:
         """
-        Parse instrument CSV. Expected columns (mStock format):
-        instrument_token, exchange_token, tradingsymbol, name,
-        last_price, expiry, strike, tick_size, lot_size,
-        instrument_type, segment, exchange
-        Filter: exchange in (NFO, BFO), instrument_type in (FUT, CE, PE)
+        Returns (equity_entries, fno_entries).
+        Both are lists of "EXCHANGE|SYMBOL|DISPLAY" strings.
+
+        mStock scriptmaster CSV columns (typical):
+          instrument_token, exchange_token, tradingsymbol, name,
+          last_price, expiry, strike, tick_size, lot_size,
+          instrument_type, segment, exchange
         """
         lines = csv_text.strip().splitlines()
         if len(lines) < 2:
-            return []
+            log.warning("scriptmaster CSV has < 2 lines, cannot parse")
+            return [], []
 
-        results = []
         try:
-            header = [h.strip().lower() for h in lines[0].split(",")]
+            header = [h.strip().strip('"').lower() for h in lines[0].split(",")]
+            log.info("scriptmaster columns: %s", header)
             sym_idx  = header.index("tradingsymbol")
             exch_idx = header.index("exchange")
             type_idx = header.index("instrument_type")
+            name_idx = header.index("name") if "name" in header else -1
             exp_idx  = header.index("expiry") if "expiry" in header else -1
-        except (ValueError, IndexError):
-            return []
+        except (ValueError, IndexError) as e:
+            log.warning("Cannot find required columns in scriptmaster: %s", e)
+            return [], []
+
+        equity, fno = [], []
+        skipped = 0
 
         for line in lines[1:]:
             parts = line.split(",")
-            if len(parts) <= max(sym_idx, exch_idx, type_idx):
-                continue
-            exch  = parts[exch_idx].strip()
-            sym   = parts[sym_idx].strip()
-            itype = parts[type_idx].strip().upper()
-
-            if exch not in ("NFO", "BFO") or itype not in ("FUT", "CE", "PE"):
+            needed = max(sym_idx, exch_idx, type_idx) + 1
+            if len(parts) < needed:
+                skipped += 1
                 continue
 
-            expiry = parts[exp_idx].strip() if exp_idx >= 0 and exp_idx < len(parts) else ""
-            display = f"{sym}  [{exch}]  {expiry}".strip()
-            results.append(f"{exch}|{sym}|{display}")
+            exch  = parts[exch_idx].strip().strip('"')
+            sym   = parts[sym_idx].strip().strip('"')
+            itype = parts[type_idx].strip().strip('"').upper()
 
-        # Sort: FUT first, then CE/PE; alphabetical within each group
-        fut = sorted([r for r in results if "FUT" in r.split("|")[1]])
-        opt = sorted([r for r in results if "FUT" not in r.split("|")[1]])
-        return fut + opt
+            if not sym or not exch:
+                continue
+
+            # Equity — NSE/BSE EQ instruments
+            if exch in ("NSE", "BSE") and itype == "EQ":
+                display = sym
+                equity.append(f"{exch}|{sym}|{display}")
+
+            # F&O — NFO/BFO futures and options
+            elif exch in ("NFO", "BFO") and itype in ("FUT", "CE", "PE"):
+                expiry = parts[exp_idx].strip().strip('"') if exp_idx >= 0 and exp_idx < len(parts) else ""
+                display = f"{sym}  {expiry}".strip() if expiry else sym
+                fno.append(f"{exch}|{sym}|{display}")
+
+        if skipped:
+            log.info("scriptmaster: skipped %d malformed lines", skipped)
+
+        # Deduplicate equity (same symbol may appear on NSE and BSE)
+        seen = set()
+        eq_deduped = []
+        for e in sorted(equity):
+            sym = e.split("|")[1]
+            if sym not in seen:
+                seen.add(sym)
+                eq_deduped.append(e)
+
+        # Sort F&O: FUT first, then CE/PE; alphabetical within each
+        fut = sorted([r for r in fno if r.split("|")[1].endswith("FUT")])
+        opt = sorted([r for r in fno if not r.split("|")[1].endswith("FUT")])
+        return eq_deduped, fut + opt
 
 
 # ── Workers ───────────────────────────────────────────────────────────────────
@@ -280,33 +331,46 @@ class OrderPanel(QWidget):
         self._load_instruments()
 
     def _build_ui(self):
-        outer = QHBoxLayout(self)
-        outer.setContentsMargins(14, 14, 14, 14)
-        outer.setSpacing(14)
+        """
+        Layout (matches sketch):
+        ┌─────────────────────┬──────────────────────────┐
+        │                     │  📈 Equity List           │
+        │  Place New Order    ├──────────────────────────┤
+        │  (form)             │  📊 F&O List              │
+        │                     ├──────────────────────────┤
+        │                     │  ℹ Quick Reference        │
+        └─────────────────────┴──────────────────────────┘
+        Left column  = order form  (fixed ~400px)
+        Right column = vertical splitter with 3 equal panels
+        """
+        root = QSplitter(Qt.Horizontal)
+        root.setHandleWidth(5)
+        root.setStyleSheet(
+            "QSplitter::handle{background:#252538;}"
+            "QSplitter::handle:hover{background:#4060C8;}"
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(root)
 
-        # ── Left: Order Form ─────────────────────────────────────
+        # ── LEFT: Order Form ──────────────────────────────────────
         form_box = QGroupBox("Place New Order")
         form_box.setStyleSheet(
             "QGroupBox{color:#AAAACC;font-weight:bold;font-size:13px;"
             "border:1px solid #252538;border-radius:8px;margin-top:10px;}"
             "QGroupBox::title{subcontrol-origin:margin;left:10px;}"
         )
-        form_box.setMinimumWidth(340)
-        form_box.setMaximumWidth(440)
         form = QFormLayout(form_box)
         form.setSpacing(9)
         form.setContentsMargins(14, 18, 14, 14)
 
-        # Symbol + LTP badge + autocomplete
+        # Symbol + LTP
         sym_row = QWidget()
         sym_lay = QHBoxLayout(sym_row)
-        sym_lay.setContentsMargins(0, 0, 0, 0)
-        sym_lay.setSpacing(6)
+        sym_lay.setContentsMargins(0,0,0,0); sym_lay.setSpacing(6)
         self.symbol_input = QLineEdit()
         self.symbol_input.setPlaceholderText("e.g. TCS-EQ, NIFTY25JUN26FUT")
         self.symbol_input.textChanged.connect(self._on_symbol_changed)
-
-        # Autocomplete with all equity symbols
         self._sym_model = QStringListModel(EQUITY_STOCKS)
         self._completer = QCompleter(self._sym_model, self)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive)
@@ -314,132 +378,154 @@ class OrderPanel(QWidget):
         self._completer.setMaxVisibleItems(12)
         self.symbol_input.setCompleter(self._completer)
         sym_lay.addWidget(self.symbol_input, 1)
-
         self.ltp_badge = QLabel("LTP  —")
         self.ltp_badge.setFixedWidth(105)
         self.ltp_badge.setAlignment(Qt.AlignCenter)
         self.ltp_badge.setStyleSheet(
             "color:#666680;font-size:11px;padding:3px 6px;"
-            "background:#1C1C2A;border:1px solid #353550;border-radius:4px;"
-        )
+            "background:#1C1C2A;border:1px solid #353550;border-radius:4px;")
         sym_lay.addWidget(self.ltp_badge)
         form.addRow("Symbol *", sym_row)
+        hint = QLabel("Equity: TCS-EQ  |  F&O: NFO exchange")
+        hint.setStyleSheet("color:#555570;font-size:10px;")
+        form.addRow("", hint)
 
-        sym_hint = QLabel("Equity: TCS-EQ  |  F&O: NFO exchange")
-        sym_hint.setStyleSheet("color:#555570;font-size:10px;")
-        form.addRow("", sym_hint)
-
-        # Exchange — NSE / BSE / NFO / BFO
+        # Exchange
         self.exchange_combo = QComboBox()
-        self.exchange_combo.addItems(["NSE", "BSE", "NFO", "BFO"])
+        self.exchange_combo.addItems(["NSE","BSE","NFO","BFO"])
         self.exchange_combo.currentTextChanged.connect(self._on_exchange_changed)
         form.addRow("Exchange", self.exchange_combo)
 
         # BUY / SELL
         side_w = QWidget()
         side_l = QHBoxLayout(side_w)
-        side_l.setContentsMargins(0, 0, 0, 0)
-        side_l.setSpacing(6)
-        self.buy_btn  = QPushButton("BUY")
-        self.sell_btn = QPushButton("SELL")
-        self.buy_btn.setCheckable(True)
-        self.sell_btn.setCheckable(True)
+        side_l.setContentsMargins(0,0,0,0); side_l.setSpacing(6)
+        self.buy_btn  = QPushButton("BUY");  self.buy_btn.setCheckable(True)
+        self.sell_btn = QPushButton("SELL"); self.sell_btn.setCheckable(True)
         self.buy_btn.clicked.connect(lambda: self._set_side("BUY"))
         self.sell_btn.clicked.connect(lambda: self._set_side("SELL"))
-        side_l.addWidget(self.buy_btn)
-        side_l.addWidget(self.sell_btn)
+        side_l.addWidget(self.buy_btn); side_l.addWidget(self.sell_btn)
         form.addRow("Side", side_w)
         self._set_side("BUY")
 
+        # Order type / Product / Variety / Validity
         self.order_type_combo = QComboBox()
-        self.order_type_combo.addItems(["MARKET", "LIMIT", "SL", "SL-M"])
+        self.order_type_combo.addItems(["MARKET","LIMIT","SL","SL-M"])
         self.order_type_combo.currentTextChanged.connect(self._update_price_visibility)
         form.addRow("Order Type", self.order_type_combo)
-
-        self.product_combo  = QComboBox(); self.product_combo.addItems(["CNC", "MIS", "NRML"])
-        self.variety_combo  = QComboBox(); self.variety_combo.addItems(["regular", "amo"])
-        self.validity_combo = QComboBox(); self.validity_combo.addItems(["DAY", "IOC"])
+        self.product_combo  = QComboBox(); self.product_combo.addItems(["CNC","MIS","NRML"])
+        self.variety_combo  = QComboBox(); self.variety_combo.addItems(["regular","amo"])
+        self.validity_combo = QComboBox(); self.validity_combo.addItems(["DAY","IOC"])
         form.addRow("Product",  self.product_combo)
         form.addRow("Variety",  self.variety_combo)
         form.addRow("Validity", self.validity_combo)
 
-        self.qty_spin = QSpinBox()
-        self.qty_spin.setRange(1, 1_000_000)
-        self.qty_spin.setValue(1)
+        # Qty / Price / Trigger
+        self.qty_spin = QSpinBox(); self.qty_spin.setRange(1,1_000_000); self.qty_spin.setValue(1)
         form.addRow("Quantity *", self.qty_spin)
-
         self.price_spin = QDoubleSpinBox()
-        self.price_spin.setRange(0, 1e7); self.price_spin.setDecimals(2)
-        self.price_spin.setPrefix("₹ ")
+        self.price_spin.setRange(0,1e7); self.price_spin.setDecimals(2); self.price_spin.setPrefix("₹ ")
         self._price_lbl = QLabel("Price")
         form.addRow(self._price_lbl, self.price_spin)
-
         self.trigger_spin = QDoubleSpinBox()
-        self.trigger_spin.setRange(0, 1e7); self.trigger_spin.setDecimals(2)
-        self.trigger_spin.setPrefix("₹ ")
+        self.trigger_spin.setRange(0,1e7); self.trigger_spin.setDecimals(2); self.trigger_spin.setPrefix("₹ ")
         self._trigger_lbl = QLabel("Trigger Price")
         form.addRow(self._trigger_lbl, self.trigger_spin)
         self._update_price_visibility("MARKET")
 
-        btn_w = QWidget()
-        btn_l = QHBoxLayout(btn_w)
-        btn_l.setContentsMargins(0, 0, 0, 0); btn_l.setSpacing(8)
+        # Buttons
+        btn_w = QWidget(); btn_l = QHBoxLayout(btn_w)
+        btn_l.setContentsMargins(0,0,0,0); btn_l.setSpacing(8)
         self.submit_btn = QPushButton("Place Order")
         self.submit_btn.setFixedHeight(40)
         self.submit_btn.setStyleSheet(
-            "background:#1A5A30;color:#50DD80;border-color:#2A7040;"
-            "font-weight:bold;font-size:13px;")
+            "background:#1A5A30;color:#50DD80;border-color:#2A7040;font-weight:bold;font-size:13px;")
         self.submit_btn.clicked.connect(self._place_order)
         clear_btn = QPushButton("Clear"); clear_btn.setFixedHeight(40)
         clear_btn.clicked.connect(self._clear_form)
         btn_l.addWidget(self.submit_btn); btn_l.addWidget(clear_btn)
         form.addRow("", btn_w)
-
         self.status_lbl = QLabel("")
         self.status_lbl.setWordWrap(True); self.status_lbl.setMinimumHeight(18)
         form.addRow("", self.status_lbl)
-        outer.addWidget(form_box, 0)
 
-        # ── Right: Equity (top) + F&O (bottom) — VERTICAL splitter ──
-        # Vertical splitter means the two panels stack top/bottom
-        splitter = QSplitter(Qt.Vertical)
-        splitter.setHandleWidth(6)
-        splitter.setStyleSheet(
-            "QSplitter::handle{background:#252538;}"
-            "QSplitter::handle:hover{background:#4060C8;}"
-        )
+        root.addWidget(form_box)   # col 1: order form
 
-        # Equity panel — top half
+        # ── COL 2: Equity list ────────────────────────────────────
         eq_entries = [f"NSE|{s}|{s}" for s in EQUITY_STOCKS]
-        self._equity_box = StockListBox(
-            f"📈  Equity Stocks  ({len(EQUITY_STOCKS)})", eq_entries
-        )
+        self._equity_box = StockListBox(f"📈  Equity Stocks  ({len(EQUITY_STOCKS)})", eq_entries)
         self._equity_box.selected.connect(self._on_stock_selected)
-        splitter.addWidget(self._equity_box)
+        root.addWidget(self._equity_box)
 
-        # F&O panel — bottom half, renamed
-        self._fno_box = StockListBox(
-            f"📊  F&O  ({len(FNO_SEED)})", FNO_SEED
-        )
+        # ── COL 3: F&O list ───────────────────────────────────────
+        self._fno_box = StockListBox(f"📊  F&O  ({len(FNO_SEED)})", FNO_SEED)
         self._fno_box.selected.connect(self._on_stock_selected)
-        splitter.addWidget(self._fno_box)
+        root.addWidget(self._fno_box)
 
-        splitter.setSizes([350, 250])
-        outer.addWidget(splitter, 1)
+        # ── COL 4: Quick Reference — full height ──────────────────
+        qr_box = QGroupBox("ℹ  Quick Reference")
+        qr_box.setStyleSheet(
+            "QGroupBox{color:#5090CC;font-weight:bold;font-size:12px;"
+            "border:1px solid #252538;border-radius:6px;margin-top:8px;background:#0A0A14;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:8px;}"
+        )
+        qr_lay = QVBoxLayout(qr_box)
+        qr_lay.setContentsMargins(8, 14, 8, 8)
+        qr_lbl = QLabel(
+            "<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}"
+            "b{color:#FFF;}.h{color:#5078DC;font-weight:bold;}</style>"
+            "<p class='h'>Symbol Format</p>"
+            "<b>NSE/BSE equity:</b> TCS-EQ, INFY-EQ<br>"
+            "<b>F&amp;O Future:</b> NIFTY25JUN26FUT<br>"
+            "<b>F&amp;O Option:</b> NIFTY25JUN2624000CE<br>"
+            "<p class='h'>Order Types</p>"
+            "<b>MARKET</b> — best price now<br>"
+            "<b>LIMIT</b> — your price or better<br>"
+            "<b>SL</b> — stop-loss + limit<br>"
+            "<b>SL-M</b> — stop-loss at market<br>"
+            "<p class='h'>Product</p>"
+            "<b>CNC</b> — delivery (overnight)<br>"
+            "<b>MIS</b> — intraday auto SQ-OFF<br>"
+            "<b>NRML</b> — F&amp;O overnight<br>"
+            "<p class='h'>Validity</p>"
+            "<b>DAY</b> — valid today only<br>"
+            "<b>IOC</b> — immediate or cancel<br>"
+            "<b>AMO</b> — after market order"
+        )
+        qr_lbl.setTextFormat(Qt.RichText)
+        qr_lbl.setWordWrap(True)
+        qr_lbl.setAlignment(Qt.AlignTop)
+        qr_lbl.setStyleSheet("background:transparent;")
+        qr_lay.addWidget(qr_lbl)
+        qr_lay.addStretch()
+        root.addWidget(qr_box)
+
+        # col proportions: form | equity | fno | quick-ref
+        root.setSizes([380, 280, 280, 180])
 
     # ── Instrument loader ─────────────────────────────────────────
 
     def _load_instruments(self):
         self._inst_loader = InstrumentLoader()
         self._inst_loader.fno_ready.connect(self._on_fno_loaded)
+        self._inst_loader.equity_ready.connect(self._on_equity_loaded)
         self._inst_loader.start()
 
     def _on_fno_loaded(self, entries: list):
         self._fno_box.update_entries(entries)
-        # Also update autocomplete with F&O symbols
         fno_syms = [e.split("|")[1] for e in entries if "|" in e]
-        all_syms = EQUITY_STOCKS + fno_syms
-        self._sym_model.setStringList(all_syms)
+        all_syms = list(self._sym_model.stringList()) + fno_syms
+        self._sym_model.setStringList(sorted(set(all_syms)))
+
+    def _on_equity_loaded(self, entries: list):
+        self._equity_box.update_entries(entries)
+        eq_syms = [e.split("|")[1] for e in entries if "|" in e]
+        # Rebuild autocomplete with live equity list
+        existing = list(self._sym_model.stringList())
+        # Remove static equity, keep F&O
+        static_eq = set(EQUITY_STOCKS)
+        non_eq = [s for s in existing if s not in static_eq]
+        self._sym_model.setStringList(sorted(set(eq_syms + non_eq)))
 
     # ── Stock selection ───────────────────────────────────────────
 
