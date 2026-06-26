@@ -77,34 +77,82 @@ class InstrumentLoader(QThread):
     fno_ready    = pyqtSignal(list)
     equity_ready = pyqtSignal(list)
 
+    # ── Cache helpers ─────────────────────────────────────────────
+    @staticmethod
+    def _cache_path():
+        """Daily cache file next to the running script/exe."""
+        import sys, os
+        from datetime import date
+        base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
+                               else os.path.abspath(__file__))
+        return os.path.join(base, f"instruments_{date.today():%Y%m%d}.json")
+
+    @staticmethod
+    def _load_cache(path: str):
+        import json
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("equity", []), data.get("fno", [])
+        except Exception:
+            return [], []
+
+    @staticmethod
+    def _save_cache(path: str, equity: list, fno: list):
+        import json, os
+        # Remove yesterday's cache files to avoid accumulation
+        cache_dir = os.path.dirname(path)
+        for fn in os.listdir(cache_dir):
+            if fn.startswith("instruments_") and fn.endswith(".json") and fn != os.path.basename(path):
+                try:
+                    os.remove(os.path.join(cache_dir, fn))
+                except Exception:
+                    pass
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"equity": equity, "fno": fno}, f)
+        except Exception:
+            pass
+
     def run(self):
         import logging, requests as _req
         log = logging.getLogger(__name__)
+
+        # ── Try cache first (refreshed once per day) ──────────────
+        cache = self._cache_path()
+        eq_cached, fno_cached = self._load_cache(cache)
+        if eq_cached and fno_cached:
+            log.info("InstrumentLoader: loaded from cache — %d equity, %d F&O",
+                     len(eq_cached), len(fno_cached))
+            self.equity_ready.emit(eq_cached)
+            self.fno_ready.emit(fno_cached)
+            return
+
+        # ── Fetch from API ────────────────────────────────────────
         try:
             client = APIClient.get()
-            # Correct URL from mStock docs:
-            # GET https://api.mstock.trade/openapi/typea/instruments/scriptmaster
             url = "https://api.mstock.trade/openapi/typea/instruments/scriptmaster"
-            log.info("InstrumentLoader: calling %s", url)
+            log.info("InstrumentLoader: fetching %s", url)
             resp = _req.get(url, headers=client._auth_headers(), timeout=30)
             log.info("InstrumentLoader: HTTP %s", resp.status_code)
             resp.raise_for_status()
             csv_text = resp.text
             total_lines = len(csv_text.strip().splitlines())
-            log.info("Instrument scriptmaster: %d raw lines (including header)", total_lines)
+            log.info("Scriptmaster: %d raw lines", total_lines)
 
             equity, fno = self._parse(csv_text, log)
-            log.info("Parsed: %d equity instruments, %d F&O instruments",
-                     len(equity), len(fno))
+            log.info("Parsed: %d equity, %d F&O instruments", len(equity), len(fno))
+
+            if equity and fno:
+                self._save_cache(cache, equity, fno)
+                log.info("InstrumentLoader: saved to cache %s", cache)
 
             self.equity_ready.emit(equity if equity else
                                    [f"NSE|{s}|{s}" for s in EQUITY_STOCKS])
             self.fno_ready.emit(fno if fno else FNO_SEED)
 
         except Exception as e:
-            import logging as _log
-            _log.getLogger(__name__).warning(
-                "InstrumentLoader failed (%s) — using static lists", e)
+            log.warning("InstrumentLoader failed (%s) — using static lists", e)
             self.equity_ready.emit([f"NSE|{s}|{s}" for s in EQUITY_STOCKS])
             self.fno_ready.emit(FNO_SEED)
 
@@ -153,7 +201,19 @@ class InstrumentLoader(QThread):
                 continue
 
             # Equity — NSE/BSE EQ instruments
+            # Filter out test/invalid symbols:
+            #   - Contain digits at start (011NSETEST, 021NSETEST etc)
+            #   - Contain "TEST" or "DUMMY"
+            #   - Shorter than 2 chars
             if exch in ("NSE", "BSE") and itype == "EQ":
+                if (len(sym) < 2 or
+                        sym[:1].isdigit() or
+                        "TEST" in sym.upper() or
+                        "DUMMY" in sym.upper()):
+                    continue
+                # Ensure -EQ suffix for NSE/BSE equity
+                if not sym.upper().endswith("-EQ"):
+                    sym = sym + "-EQ"
                 display = sym
                 equity.append(f"{exch}|{sym}|{display}")
 
@@ -531,6 +591,9 @@ class OrderPanel(QWidget):
 
     def _on_stock_selected(self, exchange: str, symbol: str, display: str):
         """Fill symbol and set correct exchange when user clicks a stock."""
+        # Auto-append -EQ for NSE/BSE equity if not already present
+        if exchange in ("NSE", "BSE") and not symbol.upper().endswith("-EQ"):
+            symbol = symbol + "-EQ"
         self.symbol_input.setText(symbol)
         # Set exchange dropdown to match
         idx = self.exchange_combo.findText(exchange)

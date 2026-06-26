@@ -196,17 +196,30 @@ class MainWindow(QMainWindow):
         layout.addWidget(logout_btn)
         return header
 
+    # Injected into every quick ref panel for consistent styling
+    _QR_STYLE = (
+        "<style>"
+        "body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;"
+        "color:#AAAACC;line-height:1.75;}"
+        "b{color:#FFFFFF;font-weight:600;}"
+        ".h{color:#5090CC;font-weight:bold;font-size:12px;"
+        "display:block;margin-top:10px;margin-bottom:3px;"
+        "border-bottom:1px solid #252538;padding-bottom:2px;}"
+        "</style>"
+    )
+
     def _build_quick_ref(self, html: str) -> QWidget:
         """
         Permanent expanded right-sidebar quick reference.
         Always visible, no toggle. Fixed width 220px.
+        Consistent font/style injected automatically.
         """
         sidebar = QGroupBox("ℹ  Quick Reference")
         sidebar.setFixedWidth(220)
         sidebar.setStyleSheet(
             "QGroupBox{color:#5090CC;font-weight:bold;font-size:12px;"
             "border:1px solid #252538;border-radius:6px;margin-top:8px;background:#0A0A14;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:10px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px;}"
         )
         vlay = QVBoxLayout(sidebar)
         vlay.setContentsMargins(0, 4, 0, 4)
@@ -215,14 +228,19 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background:transparent;")
+        scroll.setStyleSheet("background:transparent;border:none;")
 
-        lbl = QLabel(html)
+        # Strip any embedded <style> from the content and inject the standard one
+        import re as _re
+        clean = _re.sub(r"<style[^>]*>.*?</style>", "", html, flags=_re.DOTALL).strip()
+        full_html = self._QR_STYLE + clean
+
+        lbl = QLabel(full_html)
         lbl.setTextFormat(Qt.RichText)
         lbl.setWordWrap(True)
-        lbl.setAlignment(Qt.AlignTop)
-        lbl.setContentsMargins(10, 6, 10, 6)
-        lbl.setStyleSheet("background:transparent;color:#AAAACC;font-size:11px;")
+        lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        lbl.setContentsMargins(10, 8, 10, 8)
+        lbl.setStyleSheet("background:transparent;")
         scroll.setWidget(lbl)
         vlay.addWidget(scroll)
         return sidebar
