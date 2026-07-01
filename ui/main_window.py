@@ -124,7 +124,7 @@ class DataWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, preloaded: dict = None):
         super().__init__()
         self.setWindowTitle("Super Trader")
         self.setMinimumSize(1100, 700)
@@ -132,8 +132,29 @@ class MainWindow(QMainWindow):
         self._holdings_data: list = []
         self._orders_data: list = []
         self._build_ui()
-        self._start_refresh()
-        # FIX #3: always start maximized (caller may also call showMaximized)
+
+        if preloaded:
+            # Populate immediately — no initial API call needed
+            if preloaded.get("holdings") is not None:
+                self._populate_holdings(preloaded["holdings"])
+            if preloaded.get("orders") is not None:
+                self._populate_orders(preloaded["orders"])
+            if preloaded.get("funds"):
+                self._update_metrics(preloaded["funds"])
+            # Pass instruments to order panel if available
+            op = getattr(self, "_order_panel", None)
+            if op:
+                if preloaded.get("equity"):
+                    op._on_equity_loaded(preloaded["equity"])
+                if preloaded.get("fno"):
+                    op._on_fno_loaded(preloaded["fno"])
+            # Start auto-refresh timer only (no immediate fetch)
+            self._timer = QTimer(self)
+            self._timer.timeout.connect(self._refresh_data)
+            self._timer.start(15_000)
+        else:
+            self._start_refresh()
+
         self.showMaximized()
 
     # ──────────────────────────────────────
@@ -199,10 +220,10 @@ class MainWindow(QMainWindow):
     # Injected into every quick ref panel for consistent styling
     _QR_STYLE = (
         "<style>"
-        "body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;"
+        "body{font-family:'Segoe UI',Arial,sans-serif;font-size:18px;"
         "color:#AAAACC;line-height:1.75;}"
         "b{color:#FFFFFF;font-weight:600;}"
-        ".h{color:#5090CC;font-weight:bold;font-size:12px;"
+        ".h{color:#5090CC;font-weight:bold;font-size:18px;"
         "display:block;margin-top:10px;margin-bottom:3px;"
         "border-bottom:1px solid #252538;padding-bottom:2px;}"
         "</style>"
@@ -217,7 +238,7 @@ class MainWindow(QMainWindow):
         sidebar = QGroupBox("ℹ  Quick Reference")
         sidebar.setFixedWidth(220)
         sidebar.setStyleSheet(
-            "QGroupBox{color:#5090CC;font-weight:bold;font-size:12px;"
+            "QGroupBox{color:#5090CC;font-weight:bold;font-size:18px;"
             "border:1px solid #252538;border-radius:6px;margin-top:8px;background:#0A0A14;}"
             "QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px;}"
         )
@@ -293,7 +314,7 @@ class MainWindow(QMainWindow):
 
         hdr = QHBoxLayout()
         hdr.addWidget(QLabel("Current Holdings",
-                             styleSheet="font-size:14px;font-weight:bold;color:#FFF;"))
+                             styleSheet="font-size:18px;font-weight:bold;color:#FFF;"))
         hdr.addStretch()
         sell_sel_btn = QPushButton("Sell Selected")
         sell_sel_btn.setStyleSheet(
@@ -318,8 +339,8 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(content, 1)
         outer.addWidget(self._build_quick_ref(
-            "<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}"
-            "b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:11px;}</style>"
+            "<style>body{color:#AAAACC;font-size:18px;line-height:1.7;}"
+            "b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:18px;}</style>"
             "<p class='h'>Column Meanings</p>"
             "<b>Qty</b> — shares you hold<br>"
             "<b>Avg Price</b> — average buy price<br>"
@@ -381,12 +402,12 @@ class MainWindow(QMainWindow):
 
             sell_btn = QPushButton("Sell")
             sell_btn.setFixedWidth(52)
-            sell_btn.setStyleSheet("background:#5A1A1A;color:#FF6060;border-color:#703030;font-size:11px;")
+            sell_btn.setStyleSheet("background:#5A1A1A;color:#FF6060;border-color:#703030;font-size:18px;")
             sell_btn.clicked.connect(lambda _, r=row: self._quick_sell(r))
 
             mod_btn = QPushButton("Modify")
             mod_btn.setFixedWidth(60)
-            mod_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;border-color:#2A5070;font-size:11px;")
+            mod_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;border-color:#2A5070;font-size:18px;")
             mod_btn.clicked.connect(lambda _, r=row: self._modify_holding(r))
 
             action_layout.addWidget(sell_btn)
@@ -427,7 +448,7 @@ class MainWindow(QMainWindow):
         # Header with Cancel All button
         hdr = QHBoxLayout()
         hdr.addWidget(QLabel("Order Book",
-                             styleSheet="font-size:14px;font-weight:bold;color:#FFF;"))
+                             styleSheet="font-size:18px;font-weight:bold;color:#FFF;"))
         hdr.addStretch()
         cancel_all_btn = QPushButton("Cancel All Open")
         cancel_all_btn.setStyleSheet("background:#3A1515;color:#FF8080;")
@@ -458,10 +479,10 @@ class MainWindow(QMainWindow):
         count_row = QHBoxLayout()
         for key, label in [("ongoing", "Ongoing"), ("completed", "Completed"), ("cancelled", "Cancelled")]:
             lbl = QLabel("0 orders")
-            lbl.setStyleSheet("color:#555570;font-size:11px;")
+            lbl.setStyleSheet("color:#555570;font-size:18px;")
             self._order_count_labels[key] = lbl
         self._order_count_lbl = QLabel("0 orders")
-        self._order_count_lbl.setStyleSheet("color:#555570;font-size:11px;")
+        self._order_count_lbl.setStyleSheet("color:#555570;font-size:18px;")
         count_row.addWidget(self._order_count_lbl)
         count_row.addStretch()
         layout.addLayout(count_row)
@@ -471,7 +492,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.orders_table)
         outer.addWidget(content, 1)
         outer.addWidget(self._build_quick_ref("""
-<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:11px;}</style>
+<style>body{color:#AAAACC;font-size:18px;line-height:1.7;}b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:18px;}</style>
 <p class="h">Statuses</p>
 <b>O-Pending</b> — sent to exchange<br>
 <b>Open</b> — live at exchange<br>
@@ -494,9 +515,9 @@ class MainWindow(QMainWindow):
     def _sub_tab_style(self, active: bool) -> str:
         if active:
             return ("background:#252545;color:#FFFFFF;border:1px solid #4060C8;"
-                    "border-bottom:2px solid #4060C8;font-weight:bold;font-size:12px;padding:6px 18px;")
+                    "border-bottom:2px solid #4060C8;font-weight:bold;font-size:18px;padding:6px 18px;")
         return ("background:#1C1C2A;color:#888899;border:1px solid #252538;"
-                "font-size:12px;padding:6px 18px;")
+                "font-size:18px;padding:6px 18px;")
 
     def _make_orders_table(self, show_actions: bool) -> QTableWidget:
         cols = ["Order ID", "Symbol", "Exchange", "Type", "Side",
@@ -602,13 +623,13 @@ class MainWindow(QMainWindow):
                 cancel_btn = QPushButton("Cancel")
                 cancel_btn.setMinimumWidth(65)
                 cancel_btn.setMinimumHeight(28)
-                cancel_btn.setStyleSheet("background:#3A1515;color:#FF6060;font-size:11px;padding:2px 6px;")
+                cancel_btn.setStyleSheet("background:#3A1515;color:#FF6060;font-size:18px;padding:2px 6px;")
                 cancel_btn.clicked.connect(lambda _, oid=order_id: self._cancel_order(oid))
 
                 mod_btn = QPushButton("Modify")
                 mod_btn.setMinimumWidth(65)
                 mod_btn.setMinimumHeight(28)
-                mod_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;font-size:11px;padding:2px 6px;")
+                mod_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;font-size:18px;padding:2px 6px;")
                 mod_btn.clicked.connect(lambda _, oid=order_id: self._modify_order_by_id(oid))
 
                 action_layout.addWidget(cancel_btn)
@@ -631,7 +652,7 @@ class MainWindow(QMainWindow):
         self._algo_panel = AlgoPanel()
         outer.addWidget(self._algo_panel, 1)
         outer.addWidget(self._build_quick_ref("""
-<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:11px;}</style>
+<style>body{color:#AAAACC;font-size:18px;line-height:1.7;}b{color:#FFF;}.h{color:#5078DC;font-weight:bold;font-size:18px;}</style>
 <p class="h">Strategies</p>
 <b>MA Crossover</b> — buy when short MA crosses above long MA<br>
 <b>RSI</b> — buy when oversold, sell when overbought<br>
@@ -742,7 +763,7 @@ class MainWindow(QMainWindow):
         if not flat:
             for lbl in self.metric_labels.values():
                 lbl.setText("N/A")
-                lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#888899;")
+                lbl.setStyleSheet("font-size:18px;font-weight:bold;color:#888899;")
             return
 
         # _pick returns (value, found) — lets us distinguish "0" from "missing"
@@ -779,7 +800,7 @@ class MainWindow(QMainWindow):
             else:
                 color = "#888899"
             self.metric_labels[key].setStyleSheet(
-                f"font-size:15px;font-weight:bold;color:{color};")
+                f"font-size:18px;font-weight:bold;color:{color};")
     # ──────────────────────────────────────
     # Actions
     # ──────────────────────────────────────
@@ -918,7 +939,7 @@ class MainWindow(QMainWindow):
                 f"Primary and Secondary IP Address are not matching "
                 f"with current IP address.<br><br>"
                 f"<b>Your current public IP:</b><br>"
-                f"<code style='font-size:14px;'>{current_ip}</code><br><br>"
+                f"<code style='font-size:18px;'>{current_ip}</code><br><br>"
                 f"<b>Steps to fix:</b><br>"
                 f"1. Go to <b>trade.mstock.com</b><br>"
                 f"2. Menu → Products → <b>Trading APIs</b><br>"

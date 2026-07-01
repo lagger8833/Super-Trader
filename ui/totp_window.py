@@ -200,7 +200,7 @@ class TOTPWindow(QMainWindow):
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color:#FF6666;font-size:13px;min-height:20px;")
+        self.status_label.setStyleSheet("color:#FF6666;font-size:16px;min-height:20px;")
         layout.addWidget(self.status_label)
 
         back_btn = QPushButton("← Back to Login", objectName="back_btn")
@@ -267,13 +267,13 @@ class TOTPWindow(QMainWindow):
         self._resend_worker.start()
 
     def _on_resend_ok(self):
-        self.status_label.setStyleSheet("color:#40CC70;font-size:13px;")
+        self.status_label.setStyleSheet("color:#40CC70;font-size:16px;")
         self.status_label.setText("✓ OTP sent — check your mobile")
         self._start_resend_cooldown()
         self.code_input.setFocus()
 
     def _on_resend_fail(self, error: str):
-        self.status_label.setStyleSheet("color:#FF6666;font-size:13px;")
+        self.status_label.setStyleSheet("color:#FF6666;font-size:16px;")
         self.status_label.setText(f"✗ Resend failed: {error}")
         self.resend_btn.setEnabled(True)
         self.resend_btn.setText("Resend OTP")
@@ -283,7 +283,7 @@ class TOTPWindow(QMainWindow):
     def _verify(self):
         code = self.code_input.text().strip()
         if len(code) != 6 or not code.isdigit():
-            self.status_label.setStyleSheet("color:#FF6666;font-size:13px;")
+            self.status_label.setStyleSheet("color:#FF6666;font-size:16px;")
             self.status_label.setText("⚠ Enter a valid 6-digit code")
             return
 
@@ -313,18 +313,39 @@ class TOTPWindow(QMainWindow):
         self.verify_btn.setText("Verify & Continue")
 
         try:
-            from ui.main_window import MainWindow
-            self._main = MainWindow()
-            self._main.showMaximized()
+            from ui.loading_screen import LoadingScreen
+            self._loader = LoadingScreen()
+            self._loader.showMaximized()
+            self._loader.launch_ready.connect(self._on_load_ready)
+            self._loader.start()
             self.close()
+        except Exception as exc:
+            import traceback as _tb, logging as _lg
+            _lg.getLogger(__name__).error(
+                "LoadingScreen launch crashed: %s -- %s",
+                exc, _tb.format_exc()
+            )
+            QMessageBox.critical(
+                self, "Startup Error",
+                "Failed to start loading screen:\n\n" + str(exc) +
+                "\n\nPlease check the log file for details."
+            )
+
+    def _on_load_ready(self, data: dict):
+        try:
+            from ui.main_window import MainWindow
+            self._main = MainWindow(preloaded=data)
+            self._main.showMaximized()
+            self._loader.close()
         except Exception as exc:
             import traceback as _tb, logging as _lg
             _lg.getLogger(__name__).error(
                 "MainWindow launch crashed: %s -- %s",
                 exc, _tb.format_exc()
             )
+            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(
-                self, "Startup Error",
+                self._loader, "Startup Error",
                 "Dashboard failed to open:\n\n" + str(exc) +
                 "\n\nPlease check the log file for details."
             )
@@ -353,7 +374,7 @@ class TOTPWindow(QMainWindow):
                 f"<b>mStock blocked this request:</b><br>"
                 f"{error}<br><br>"
                 f"<b>Your current public IP:</b><br>"
-                f"<code style='font-size:14px;'>{current_ip}</code><br><br>"
+                f"<code style='font-size:16px;'>{current_ip}</code><br><br>"
                 f"<b>Steps to fix:</b><br>"
                 f"1. Go to <b>trade.mstock.com</b><br>"
                 f"2. Menu → Products → <b>Trading APIs</b><br>"
@@ -364,10 +385,10 @@ class TOTPWindow(QMainWindow):
                 f"Contact mStock support if the issue persists:<br>"
                 f"<b>tradingapi@mstock.com</b></i>",
             )
-            self.status_label.setStyleSheet("color:#FF8800;font-size:12px;")
+            self.status_label.setStyleSheet("color:#FF8800;font-size:16px;")
             self.status_label.setText("⚠ IP not whitelisted — see popup for steps")
         else:
-            self.status_label.setStyleSheet("color:#FF6666;font-size:13px;")
+            self.status_label.setStyleSheet("color:#FF6666;font-size:16px;")
             self.status_label.setText(f"✗ {error}")
 
     def _back(self):

@@ -119,7 +119,7 @@ class LoginWindow(QMainWindow):
         self.status_lbl = QLabel("")
         self.status_lbl.setAlignment(Qt.AlignCenter)
         self.status_lbl.setWordWrap(True)
-        self.status_lbl.setStyleSheet("color:#FF6666;font-size:12px;")
+        self.status_lbl.setStyleSheet("color:#FF6666;font-size:16px;")
         lay.addWidget(self.status_lbl)
 
         outer.addWidget(card)
@@ -132,7 +132,7 @@ class LoginWindow(QMainWindow):
             self._checksum = checksum
             self.key_badge.setText("✓  API Key Found")
             self.key_badge.setStyleSheet(
-                "color:#40CC70; font-size:13px; font-weight:bold;"
+                "color:#40CC70; font-size:16px; font-weight:bold;"
                 "background:#0F2A1A; border:1px solid #1A5A30; border-radius:4px; padding:4px 12px;"
             )
             self.login_btn.setEnabled(True)
@@ -142,7 +142,7 @@ class LoginWindow(QMainWindow):
             env_path = get_env_file_path()
             self.key_badge.setText(f"✗  API Key Not Found  —  add API_KEY to: {env_path}")
             self.key_badge.setStyleSheet(
-                "color:#FF6666; font-size:12px;"
+                "color:#FF6666; font-size:16px;"
                 "background:#2A0F0F; border:1px solid #5A2020; border-radius:4px; padding:4px 12px;"
             )
             self.key_badge.setFixedHeight(48)

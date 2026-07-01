@@ -12,12 +12,13 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QBrush
 
-from algo.engine import get_engine, MovingAverageCrossStrategy, RSIOverboughtStrategy, PriceLevelStrategy
+from algo.engine import get_engine, MovingAverageCrossStrategy, RSIOverboughtStrategy, PriceLevelStrategy, BracketGuardStrategy
 
 STRATEGY_MAP = {
     "Moving Average Crossover": MovingAverageCrossStrategy,
-    "RSI Overbought/Oversold": RSIOverboughtStrategy,
-    "Price Level Trigger":     PriceLevelStrategy,
+    "RSI Overbought/Oversold":  RSIOverboughtStrategy,
+    "Price Level Trigger":      PriceLevelStrategy,
+    "Bracket Guard (Target+SL)": BracketGuardStrategy,
 }
 
 
@@ -41,7 +42,7 @@ class AlgoPanel(QWidget):
 
         # Strategy builder
         builder_box = QGroupBox("Add Strategy")
-        builder_box.setStyleSheet("QGroupBox { color: #AAAACC; font-weight:bold; font-size:12px;"
+        builder_box.setStyleSheet("QGroupBox { color: #AAAACC; font-weight:bold; font-size:15px;"
                                   " border:1px solid #252538; border-radius:6px; margin-top:8px; }"
                                   " QGroupBox::title { subcontrol-origin:margin; left:8px; }")
         form = QFormLayout(builder_box)
@@ -86,6 +87,12 @@ class AlgoPanel(QWidget):
         self.buy_price.setRange(0, 1e7);  self.buy_price.setDecimals(2)
         self.sell_price = QDoubleSpinBox()
         self.sell_price.setRange(0, 1e7); self.sell_price.setDecimals(2)
+        self.target_pct = QDoubleSpinBox()
+        self.target_pct.setRange(0.01, 100); self.target_pct.setDecimals(2)
+        self.target_pct.setValue(0.9); self.target_pct.setSuffix(" %")
+        self.sl_pct = QDoubleSpinBox()
+        self.sl_pct.setRange(0.01, 100); self.sl_pct.setDecimals(2)
+        self.sl_pct.setValue(0.9); self.sl_pct.setSuffix(" %")
 
         self._param_rows = {
             "short_window": ("Short MA Window:", self.short_spin),
@@ -95,6 +102,8 @@ class AlgoPanel(QWidget):
             "rsi_os":       ("Oversold Level:",  self.rsi_os),
             "buy_price":    ("Buy Price (₹):",   self.buy_price),
             "sell_price":   ("Sell Price (₹):",  self.sell_price),
+            "target_pct":   ("Target % (+):",    self.target_pct),
+            "sl_pct":       ("Stop-Loss % (-):", self.sl_pct),
         }
         for label, widget in self._param_rows.values():
             form.addRow(label, widget)
@@ -121,7 +130,7 @@ class AlgoPanel(QWidget):
         self.start_btn.clicked.connect(self._toggle_engine)
 
         self.engine_status = QLabel("● Stopped")
-        self.engine_status.setStyleSheet("color:#FF5555;font-size:12px;font-weight:bold;")
+        self.engine_status.setStyleSheet("color:#FF5555;font-size:15px;font-weight:bold;")
 
         ctrl_layout.addWidget(self.start_btn)
         ctrl_layout.addWidget(self.engine_status)
@@ -136,7 +145,7 @@ class AlgoPanel(QWidget):
         right.setSpacing(12)
 
         strat_label = QLabel("Active Strategies")
-        strat_label.setStyleSheet("font-size:13px;font-weight:bold;color:#FFF;")
+        strat_label.setStyleSheet("font-size:16px;font-weight:bold;color:#FFF;")
         right.addWidget(strat_label)
 
         self.strat_table = QTableWidget()
@@ -152,32 +161,33 @@ class AlgoPanel(QWidget):
         right.addWidget(self.strat_table)
 
         log_label = QLabel("Signal Log")
-        log_label.setStyleSheet("font-size:13px;font-weight:bold;color:#FFF;")
+        log_label.setStyleSheet("font-size:16px;font-weight:bold;color:#FFF;")
         right.addWidget(log_label)
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setStyleSheet(
-            "background:#0E0E18;color:#AAFFAA;font-family:monospace;font-size:11px;"
+            "background:#0E0E18;color:#AAFFAA;font-family:monospace;font-size:15px;"
             "border:1px solid #252538;border-radius:4px;")
         right.addWidget(self.log_view)
 
         layout.addLayout(right, 2)
 
     def _update_params(self, strategy_name: str):
-        ma_params    = ["short_window", "long_window"]
-        rsi_params   = ["rsi_period", "rsi_ob", "rsi_os"]
-        price_params = ["buy_price", "sell_price"]
+        ma_params      = ["short_window", "long_window"]
+        rsi_params     = ["rsi_period", "rsi_ob", "rsi_os"]
+        price_params   = ["buy_price", "sell_price"]
+        bracket_params = ["target_pct", "sl_pct"]
 
         show_keys = (
-            ma_params    if strategy_name == "Moving Average Crossover"
-            else rsi_params   if strategy_name == "RSI Overbought/Oversold"
+            ma_params      if strategy_name == "Moving Average Crossover"
+            else rsi_params     if strategy_name == "RSI Overbought/Oversold"
+            else bracket_params if strategy_name == "Bracket Guard (Target+SL)"
             else price_params
         )
         form = self.strategy_combo.parent().layout()
         for key, (label, widget) in self._param_rows.items():
             widget.setVisible(key in show_keys)
-            # Also hide the label row
             for i in range(form.rowCount()):
                 item = form.itemAt(i, QFormLayout.LabelRole)
                 if item and item.widget() and item.widget().text() == label:
@@ -204,6 +214,10 @@ class AlgoPanel(QWidget):
                     period=self.rsi_period.value(),
                     overbought=self.rsi_ob.value(),
                     oversold=self.rsi_os.value())
+        elif name == "Bracket Guard (Target+SL)":
+            s = cls(symbol, exchange, qty, product,
+                    target_pct=self.target_pct.value(),
+                    sl_pct=self.sl_pct.value())
         else:
             s = cls(symbol, exchange, qty, product,
                     buy_price=self.buy_price.value(),
@@ -212,6 +226,15 @@ class AlgoPanel(QWidget):
         self._engine.add_strategy(s)
         self._refresh_strat_table()
         self._log(f"[ADD] {name} → {symbol} ({exchange}) qty={qty}")
+        from algo.engine import BracketGuardStrategy as _BGS
+        if isinstance(s, _BGS):
+            if not self._engine._running:
+                self._engine.start()
+                self._update_engine_btn(running=True)
+            self._log(
+                '<span style="color:#50A0FF">[BracketGuard] ' +
+                f'Auto-monitoring {symbol} — reacts within 0.5s of holding appearing</span>'
+            )
 
     def _refresh_strat_table(self):
         strategies = self._engine.strategies
@@ -228,7 +251,7 @@ class AlgoPanel(QWidget):
                 t.setItem(row, col, item)
 
             rm_btn = QPushButton("✕")
-            rm_btn.setStyleSheet("background:#3A1515;color:#FF6060;font-size:12px;")
+            rm_btn.setStyleSheet("background:#3A1515;color:#FF6060;font-size:15px;")
             rm_btn.clicked.connect(lambda _, r=row: self._remove_strategy(r))
             t.setCellWidget(row, 5, rm_btn)
 
@@ -237,29 +260,35 @@ class AlgoPanel(QWidget):
         self._refresh_strat_table()
         self._log(f"[REMOVE] Strategy #{row} removed")
 
+    def _update_engine_btn(self, running: bool):
+        if running:
+            self.start_btn.setText("■  Stop Engine")
+            self.start_btn.setStyleSheet("background:#5A1A1A;color:#FF6060;font-weight:bold;")
+            self.engine_status.setText("● Running")
+            self.engine_status.setStyleSheet("color:#40CC70;font-weight:bold;")
+        else:
+            self.start_btn.setText("▶  Start Engine")
+            self.start_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;font-weight:bold;")
+            self.engine_status.setText("● Stopped")
+            self.engine_status.setStyleSheet("color:#FF5555;font-weight:bold;")
+
     def _toggle_engine(self):
         if self._engine._running:
             self._engine.stop()
             self.start_btn.setText("▶  Start Engine")
             self.start_btn.setStyleSheet("background:#1A3A5A;color:#50A0FF;font-weight:bold;")
-            self.engine_status.setText("● Stopped")
-            self.engine_status.setStyleSheet("color:#FF5555;font-size:12px;font-weight:bold;")
+            self._update_engine_btn(running=False)
             self._log("[ENGINE] Stopped")
         else:
             if not self._engine.strategies:
                 QMessageBox.warning(self, "No Strategies", "Add at least one strategy first.")
                 return
             self._engine.start()
-            self.start_btn.setText("■  Stop Engine")
-            self.start_btn.setStyleSheet("background:#5A1A1A;color:#FF6060;font-weight:bold;")
-            self.engine_status.setText("● Running")
-            self.engine_status.setStyleSheet("color:#40CC70;font-size:12px;font-weight:bold;")
+            self._update_engine_btn(running=True)
             self._log("[ENGINE] Started")
 
-    def _on_signal(self, symbol: str, action: str, result: dict):
-        color = "#50DD80" if action == "BUY" else "#FF6060"
-        status = "OK" if result.get("success") else f"FAILED: {result.get('error','?')}"
-        self._log(f'<span style="color:{color}">[SIGNAL] {action} {symbol} → {status}</span>')
+    def _on_signal(self, symbol: str, msg: str, color: str = "#AAAACC"):
+        self._log(f'<span style="color:{color}">[{symbol}] {msg}</span>')
 
     def _on_error(self, strategy, error: str):
         self._log(f'<span style="color:#FF8800">[ERROR] {type(strategy).__name__}: {error}</span>')

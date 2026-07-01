@@ -15,51 +15,118 @@ Layout:
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QLineEdit, QDoubleSpinBox,
-    QSpinBox, QGroupBox, QFormLayout, QListWidget,
+    QSpinBox, QGroupBox, QFormLayout, QListWidget, QListView,
     QCompleter, QSplitter, QFrame, QApplication
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QStringListModel
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QStringListModel, QAbstractListModel, QModelIndex
 from PyQt5.QtGui import QColor
 from core.api_client import APIClient
 
-# ── Static equity list (NSE, -EQ suffix required by mStock API) ──────────────
-# Shown until instruments API loads. Sorted alphabetically.
-EQUITY_STOCKS = sorted([
-    "ADANIPORTS-EQ","APOLLOHOSP-EQ","ASIANPAINT-EQ","AXISBANK-EQ",
-    "BAJAJ-AUTO-EQ","BAJAJFINSV-EQ","BAJFINANCE-EQ","BERGEPAINT-EQ",
-    "BHARTIARTL-EQ","BPCL-EQ","BRITANNIA-EQ","CIPLA-EQ","COALINDIA-EQ",
-    "COLPAL-EQ","DABUR-EQ","DIVISLAB-EQ","DMART-EQ","DRREDDY-EQ",
-    "EICHERMOT-EQ","GRASIM-EQ","HAVELLS-EQ","HCLTECH-EQ","HDFCBANK-EQ",
-    "HDFCLIFE-EQ","HEROMOTOCO-EQ","HINDALCO-EQ","HINDUNILVR-EQ",
-    "ICICIBANK-EQ","IDEA-EQ","INDUSINDBK-EQ","INFY-EQ","IOC-EQ",
-    "IRCTC-EQ","ITC-EQ","JSWSTEEL-EQ","KOTAKBANK-EQ","LT-EQ",
-    "MARICO-EQ","MARUTI-EQ","NESTLEIND-EQ","NYKAA-EQ","NTPC-EQ",
-    "ONGC-EQ","PAYTM-EQ","PIDILITIND-EQ","POWERGRID-EQ","RELIANCE-EQ",
-    "SBIN-EQ","SBILIFE-EQ","SUNPHARMA-EQ","TATAMOTORS-EQ","TATASTEEL-EQ",
-    "TATACONSUM-EQ","TCS-EQ","TECHM-EQ","TITAN-EQ","ULTRACEMCO-EQ",
-    "WIPRO-EQ","YESBANK-EQ","ZOMATO-EQ",
-])
+# ── Static equity seed — symbol → display name ───────────────────────────────
+# Used only before the instrument API loads. Replaced by live data on startup.
+# Format: { "SYMBOL-EQ": "Company Name" }
+EQUITY_SEED = {
+    "ADANIPORTS-EQ": "Adani Ports & SEZ",
+    "APOLLOHOSP-EQ": "Apollo Hospitals",
+    "ASIANPAINT-EQ": "Asian Paints",
+    "AXISBANK-EQ":   "Axis Bank",
+    "BAJAJ-AUTO-EQ": "Bajaj Auto",
+    "BAJAJFINSV-EQ": "Bajaj Finserv",
+    "BAJFINANCE-EQ": "Bajaj Finance",
+    "BERGEPAINT-EQ": "Berger Paints",
+    "BHARTIARTL-EQ": "Bharti Airtel",
+    "BPCL-EQ":       "Bharat Petroleum",
+    "BRITANNIA-EQ":  "Britannia Industries",
+    "CIPLA-EQ":      "Cipla",
+    "COALINDIA-EQ":  "Coal India",
+    "COLPAL-EQ":     "Colgate-Palmolive India",
+    "DABUR-EQ":      "Dabur India",
+    "DIVISLAB-EQ":   "Divi's Laboratories",
+    "DMART-EQ":      "Avenue Supermarts (DMart)",
+    "DRREDDY-EQ":    "Dr. Reddy's Laboratories",
+    "EICHERMOT-EQ":  "Eicher Motors",
+    "GRASIM-EQ":     "Grasim Industries",
+    "HAVELLS-EQ":    "Havells India",
+    "HCLTECH-EQ":    "HCL Technologies",
+    "HDFCBANK-EQ":   "HDFC Bank",
+    "HDFCLIFE-EQ":   "HDFC Life Insurance",
+    "HEROMOTOCO-EQ": "Hero MotoCorp",
+    "HINDALCO-EQ":   "Hindalco Industries",
+    "HINDUNILVR-EQ": "Hindustan Unilever",
+    "ICICIBANK-EQ":  "ICICI Bank",
+    "IDEA-EQ":       "Vodafone Idea",
+    "INDUSINDBK-EQ": "IndusInd Bank",
+    "INFY-EQ":       "Infosys",
+    "IOC-EQ":        "Indian Oil Corporation",
+    "IRCTC-EQ":      "IRCTC",
+    "ITC-EQ":        "ITC Limited",
+    "JSWSTEEL-EQ":   "JSW Steel",
+    "KOTAKBANK-EQ":  "Kotak Mahindra Bank",
+    "LT-EQ":         "Larsen & Toubro",
+    "MARICO-EQ":     "Marico",
+    "MARUTI-EQ":     "Maruti Suzuki",
+    "NESTLEIND-EQ":  "Nestle India",
+    "NTPC-EQ":       "NTPC",
+    "NYKAA-EQ":      "Nykaa (FSN E-Commerce)",
+    "ONGC-EQ":       "Oil & Natural Gas Corp",
+    "PAYTM-EQ":      "Paytm (One 97 Communications)",
+    "PIDILITIND-EQ": "Pidilite Industries",
+    "POWERGRID-EQ":  "Power Grid Corporation",
+    "RELIANCE-EQ":   "Reliance Industries",
+    "SBIN-EQ":       "State Bank of India",
+    "SBILIFE-EQ":    "SBI Life Insurance",
+    "SUNPHARMA-EQ":  "Sun Pharmaceutical",
+    "TATAMOTORS-EQ": "Tata Motors",
+    "TATASTEEL-EQ":  "Tata Steel",
+    "TATACONSUM-EQ": "Tata Consumer Products",
+    "TCS-EQ":        "Tata Consultancy Services",
+    "TECHM-EQ":      "Tech Mahindra",
+    "TITAN-EQ":      "Titan Company",
+    "ULTRACEMCO-EQ": "UltraTech Cement",
+    "WIPRO-EQ":      "Wipro",
+    "YESBANK-EQ":    "Yes Bank",
+    "ZOMATO-EQ":     "Zomato",
+}
 
-# Static F&O seed list — shows while live data loads from API
-# Format: exchange|symbol|display  (pipe-separated for easy parsing)
+# Keep a flat list of symbols for autocomplete seeding
+EQUITY_STOCKS = list(EQUITY_SEED.keys())
+
+def _seed_entry(sym: str) -> str:
+    """Build a pipe entry with proper display name for the seed list."""
+    name = EQUITY_SEED.get(sym, sym.replace("-EQ", ""))
+    return f"NSE|{sym}|{name}  ({sym})"
+
+def _cache_dir() -> str:
+    """Returns the cache/ directory next to the project root / EXE."""
+    import os, sys
+    if getattr(sys, "frozen", False):
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        # This file lives in ui/ — go up one level to project root
+        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    d = os.path.join(app_dir, "cache")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+# Static F&O seed — shown before the API loads
+# Display format: "Company Name — MonthYY FUT"
 FNO_SEED = [
-    # Index futures (current month — update symbol date as needed)
-    "NFO|NIFTY25JUN26FUT|NIFTY Jun 26 FUT",
-    "NFO|BANKNIFTY25JUN26FUT|BANKNIFTY Jun 26 FUT",
-    "NFO|FINNIFTY25JUN26FUT|FINNIFTY Jun 26 FUT",
-    # Common stock futures
-    "NFO|RELIANCE25JUN26FUT|RELIANCE Jun 26 FUT",
-    "NFO|TCS25JUN26FUT|TCS Jun 26 FUT",
-    "NFO|INFY25JUN26FUT|INFY Jun 26 FUT",
-    "NFO|HDFCBANK25JUN26FUT|HDFCBANK Jun 26 FUT",
-    "NFO|SBIN25JUN26FUT|SBIN Jun 26 FUT",
-    "NFO|ICICIBANK25JUN26FUT|ICICIBANK Jun 26 FUT",
-    "NFO|WIPRO25JUN26FUT|WIPRO Jun 26 FUT",
-    "NFO|AXISBANK25JUN26FUT|AXISBANK Jun 26 FUT",
-    "NFO|BAJFINANCE25JUN26FUT|BAJFINANCE Jun 26 FUT",
-    "NFO|TATAMOTORS25JUN26FUT|TATAMOTORS Jun 26 FUT",
-    "NFO|MARUTI25JUN26FUT|MARUTI Jun 26 FUT",
-    "NFO|LT25JUN26FUT|LT Jun 26 FUT",
+    "NFO|NIFTY25JUN26FUT|Nifty 50 — Jun 26 FUT",
+    "NFO|BANKNIFTY25JUN26FUT|Bank Nifty — Jun 26 FUT",
+    "NFO|FINNIFTY25JUN26FUT|Nifty Financial Svcs — Jun 26 FUT",
+    "NFO|RELIANCE25JUN26FUT|Reliance Industries — Jun 26 FUT",
+    "NFO|TCS25JUN26FUT|Tata Consultancy Services — Jun 26 FUT",
+    "NFO|INFY25JUN26FUT|Infosys — Jun 26 FUT",
+    "NFO|HDFCBANK25JUN26FUT|HDFC Bank — Jun 26 FUT",
+    "NFO|SBIN25JUN26FUT|State Bank of India — Jun 26 FUT",
+    "NFO|ICICIBANK25JUN26FUT|ICICI Bank — Jun 26 FUT",
+    "NFO|WIPRO25JUN26FUT|Wipro — Jun 26 FUT",
+    "NFO|AXISBANK25JUN26FUT|Axis Bank — Jun 26 FUT",
+    "NFO|BAJFINANCE25JUN26FUT|Bajaj Finance — Jun 26 FUT",
+    "NFO|TATAMOTORS25JUN26FUT|Tata Motors — Jun 26 FUT",
+    "NFO|MARUTI25JUN26FUT|Maruti Suzuki — Jun 26 FUT",
+    "NFO|LT25JUN26FUT|Larsen & Toubro — Jun 26 FUT",
 ]
 
 
@@ -80,12 +147,9 @@ class InstrumentLoader(QThread):
     # ── Cache helpers ─────────────────────────────────────────────
     @staticmethod
     def _cache_path():
-        """Daily cache file next to the running script/exe."""
-        import sys, os
+        """Daily cache file in the cache/ directory."""
         from datetime import date
-        base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
-                               else os.path.abspath(__file__))
-        return os.path.join(base, f"instruments_{date.today():%Y%m%d}.json")
+        return f"{_cache_dir()}/instruments_{date.today():%Y%m%d}.json"
 
     @staticmethod
     def _load_cache(path: str):
@@ -100,12 +164,12 @@ class InstrumentLoader(QThread):
     @staticmethod
     def _save_cache(path: str, equity: list, fno: list):
         import json, os
-        # Remove yesterday's cache files to avoid accumulation
-        cache_dir = os.path.dirname(path)
-        for fn in os.listdir(cache_dir):
+        # Remove yesterday's cache files from the cache/ directory
+        d = _cache_dir()
+        for fn in os.listdir(d):
             if fn.startswith("instruments_") and fn.endswith(".json") and fn != os.path.basename(path):
                 try:
-                    os.remove(os.path.join(cache_dir, fn))
+                    os.remove(os.path.join(d, fn))
                 except Exception:
                     pass
         try:
@@ -148,12 +212,12 @@ class InstrumentLoader(QThread):
                 log.info("InstrumentLoader: saved to cache %s", cache)
 
             self.equity_ready.emit(equity if equity else
-                                   [f"NSE|{s}|{s}" for s in EQUITY_STOCKS])
+                                   [_seed_entry(s) for s in EQUITY_STOCKS])
             self.fno_ready.emit(fno if fno else FNO_SEED)
 
         except Exception as e:
             log.warning("InstrumentLoader failed (%s) — using static lists", e)
-            self.equity_ready.emit([f"NSE|{s}|{s}" for s in EQUITY_STOCKS])
+            self.equity_ready.emit([_seed_entry(s) for s in EQUITY_STOCKS])
             self.fno_ready.emit(FNO_SEED)
 
     def _parse(self, csv_text: str, log) -> tuple:
@@ -289,88 +353,180 @@ class PlaceOrderWorker(QThread):
 
 # ── Stock list widget ─────────────────────────────────────────────────────────
 
+class _VirtualModel(QAbstractListModel):
+    """
+    Virtual list model — holds all entries in a plain Python list.
+    Qt only asks for display data for visible rows, so 149k entries
+    cost almost nothing until the user scrolls or searches.
+    """
+    def __init__(self, entries=None):
+        super().__init__()
+        self._entries: list = entries or []
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self._entries)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid() or index.row() >= len(self._entries):
+            return None
+        entry = self._entries[index.row()]
+        if role == Qt.DisplayRole:
+            parts = entry.split("|")
+            return parts[2] if len(parts) == 3 else entry
+        if role == Qt.UserRole:
+            return entry
+        return None
+
+    def set_entries(self, entries: list):
+        self.beginResetModel()
+        self._entries = entries
+        self.endResetModel()
+
+    def entry_at(self, row: int) -> str:
+        return self._entries[row] if 0 <= row < len(self._entries) else ""
+
+
 class StockListBox(QGroupBox):
     """
-    Compact searchable list.
-    Each item stores exchange|symbol|display in UserRole.
-    Emitting: (exchange, symbol, display)
+    Searchable stock list using a virtual QAbstractListModel + QListView.
+    Only visible rows are rendered — handles 150k entries without lag.
+    Debounces search input so filtering doesn't block the UI.
     """
     selected = pyqtSignal(str, str, str)   # exchange, symbol, display
 
-    LIST_STYLE = """
-        QListWidget {
-            background:#0E0E18; border:1px solid #252538;
-            color:#DCDCE6; font-size:12px;
-        }
-        QListWidget::item { padding:4px 8px; border-bottom:1px solid #1A1A28; }
-        QListWidget::item:hover    { background:#1C1C2A; color:#FFFFFF; }
-        QListWidget::item:selected { background:#252545; color:#FFFFFF; }
-        QLineEdit {
-            background:#1C1C2A; border:1px solid #353550; border-radius:3px;
-            padding:4px 8px; color:#DCDCE6; font-size:11px;
-        }
-        QLineEdit:focus { border-color:#5078DC; }
-    """
+    _STYLE = (
+        "QGroupBox{color:#AAAACC;font-weight:bold;font-size:16px;"
+        "border:1px solid #252538;border-radius:6px;margin-top:8px;}"
+        "QGroupBox::title{subcontrol-origin:margin;left:8px;}"
+        "QListView{background:#0E0E18;border:1px solid #252538;"
+        "color:#DCDCE6;font-size:16px;outline:none;}"
+        "QListView::item{padding:4px 8px;border-bottom:1px solid #1A1A28;}"
+        "QListView::item:hover{background:#1C1C2A;color:#FFF;}"
+        "QListView::item:selected{background:#252545;color:#FFF;}"
+        "QLineEdit{background:#1C1C2A;border:1px solid #353550;"
+        "border-radius:3px;padding:4px 8px;color:#DCDCE6;font-size:16px;}"
+        "QLineEdit:focus{border-color:#5078DC;}"
+    )
 
     def __init__(self, title: str, entries: list, parent=None):
-        """entries: list of "EXCHANGE|SYMBOL|DISPLAY" or plain "SYMBOL-EQ" strings"""
         super().__init__(title, parent)
-        self._all = entries
-        self.setStyleSheet(
-            "QGroupBox{color:#AAAACC;font-weight:bold;font-size:12px;"
-            "border:1px solid #252538;border-radius:6px;margin-top:8px;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:8px;}"
-        )
+        self._all: list = entries
+        self.setStyleSheet(self._STYLE)
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 14, 6, 6)
         lay.setSpacing(4)
 
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search…")
-        self._search.textChanged.connect(self._filter)
+        self._search.textChanged.connect(self._on_search_changed)
         lay.addWidget(self._search)
 
-        self._list = QListWidget()
-        self._list.itemClicked.connect(self._on_click)
-        lay.addWidget(self._list)
-        self.setStyleSheet(self.styleSheet() + self.LIST_STYLE)
-        self._populate(entries)
+        # Debounce timer — filter fires 200ms after typing stops
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.timeout.connect(self._apply_filter)
+        self._pending_query = ""
 
-    def _parse(self, entry: str):
-        """Returns (exchange, symbol, display)"""
+        self._model = _VirtualModel(entries)
+        self._view  = QListView()
+        self._view.setModel(self._model)
+        self._view.setUniformItemSizes(True)        # critical for speed
+        self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._view.clicked.connect(self._on_click)
+        lay.addWidget(self._view)
+
+    def _on_search_changed(self, text: str):
+        self._pending_query = text.strip().upper()
+        self._filter_timer.start(200)
+
+    def _apply_filter(self):
+        q = self._pending_query
+        if not q:
+            self._model.set_entries(self._all)
+        else:
+            self._model.set_entries([e for e in self._all if q in e.upper()])
+
+    @staticmethod
+    def _parse(entry: str):
         parts = entry.split("|")
         if len(parts) == 3:
             return parts[0], parts[1], parts[2]
-        # Plain equity symbol like "INFY-EQ"
         return "NSE", entry, entry
 
-    def _populate(self, entries: list):
-        self._list.clear()
-        for e in entries:
-            _, sym, display = self._parse(e)
-            from PyQt5.QtWidgets import QListWidgetItem
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, e)
-            self._list.addItem(item)
-
-    def _filter(self, text: str):
-        q = text.strip().upper()
-        if not q:
-            self._populate(self._all)
-            return
-        filtered = [e for e in self._all if q in e.upper()]
-        self._populate(filtered)
-
-    def _on_click(self, item):
-        entry = item.data(Qt.UserRole)
-        exch, sym, display = self._parse(entry)
-        self.selected.emit(exch, sym, display)
+    def _on_click(self, index):
+        entry = self._model.entry_at(index.row())
+        if entry:
+            exch, sym, display = self._parse(entry)
+            self.selected.emit(exch, sym, display)
 
     def update_entries(self, entries: list):
         self._all = entries
-        self._populate(entries)
-        count = len(entries)
-        self.setTitle(f"{self.title().split('(')[0].strip()}  ({count})")
+        self._model.set_entries(entries)
+        title_base = self.title().split("(")[0].strip()
+        self.setTitle(f"{title_base}  ({len(entries)})")
+
+
+class FnoListBox(StockListBox):
+    """
+    F&O variant of StockListBox.
+    - Shows futures only by default (~3k rows — fast)
+    - When user types a search query, also searches options (loaded lazily)
+    - Options (~146k) are read from the daily cache file on first search
+    """
+
+    def __init__(self, title: str, seed: list, parent=None):
+        super().__init__(title, seed, parent)
+        self._futures: list = seed
+        self._options: list = []          # loaded lazily
+        self._options_loaded = False
+        self._hint = QLabel("Showing futures — type to search all options")
+        self._hint.setStyleSheet(
+            "color:#555570;font-size:16px;padding:2px 6px;"
+        )
+        # Insert hint above the list view
+        lay = self.layout()
+        lay.insertWidget(1, self._hint)   # after search box
+
+    def set_futures(self, futures: list):
+        self._futures = futures
+        self._all = futures
+        self._model.set_entries(futures)
+        base = self.title().split("(")[0].strip()
+        self.setTitle(f"{base}  ({len(futures)} futures)")
+
+    def _load_options_if_needed(self):
+        if self._options_loaded:
+            return
+        import json, os
+        from datetime import date
+        opt_file = os.path.join(_cache_dir(), f"opt_{date.today():%Y%m%d}.json")
+        if os.path.exists(opt_file):
+            try:
+                with open(opt_file, "r", encoding="utf-8") as f:
+                    self._options = json.load(f)
+                self._options_loaded = True
+            except Exception:
+                self._options_loaded = True   # don't retry on error
+
+    def _apply_filter(self):
+        q = self._pending_query
+        if not q:
+            # No query — show futures only
+            self._model.set_entries(self._futures)
+            self._hint.setText(
+                f"Showing {len(self._futures):,} futures — type to search all options"
+            )
+        else:
+            # Load options lazily on first search
+            self._load_options_if_needed()
+            combined = self._futures + self._options
+            results = [e for e in combined if q in e.upper()]
+            self._model.set_entries(results)
+            self._hint.setText(
+                f"{len(results):,} results  "
+                f"(from {len(combined):,} total instruments)"
+            )
 
 
 # ── Main panel ────────────────────────────────────────────────────────────────
@@ -416,7 +572,7 @@ class OrderPanel(QWidget):
         # ── LEFT: Order Form ──────────────────────────────────────
         form_box = QGroupBox("Place New Order")
         form_box.setStyleSheet(
-            "QGroupBox{color:#AAAACC;font-weight:bold;font-size:13px;"
+            "QGroupBox{color:#AAAACC;font-weight:bold;font-size:16px;"
             "border:1px solid #252538;border-radius:8px;margin-top:10px;}"
             "QGroupBox::title{subcontrol-origin:margin;left:10px;}"
         )
@@ -431,7 +587,9 @@ class OrderPanel(QWidget):
         self.symbol_input = QLineEdit()
         self.symbol_input.setPlaceholderText("e.g. TCS-EQ, NIFTY25JUN26FUT")
         self.symbol_input.textChanged.connect(self._on_symbol_changed)
-        self._sym_model = QStringListModel(EQUITY_STOCKS)
+        # Autocomplete seeded with futures symbols — equity removed
+        _fut_syms = [e.split("|")[1] for e in FNO_SEED if "|" in e]
+        self._sym_model = QStringListModel(_fut_syms)
         self._completer = QCompleter(self._sym_model, self)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive)
         self._completer.setFilterMode(Qt.MatchContains)
@@ -442,17 +600,17 @@ class OrderPanel(QWidget):
         self.ltp_badge.setFixedWidth(105)
         self.ltp_badge.setAlignment(Qt.AlignCenter)
         self.ltp_badge.setStyleSheet(
-            "color:#666680;font-size:11px;padding:3px 6px;"
+            "color:#666680;font-size:16px;padding:3px 6px;"
             "background:#1C1C2A;border:1px solid #353550;border-radius:4px;")
         sym_lay.addWidget(self.ltp_badge)
         form.addRow("Symbol *", sym_row)
         hint = QLabel("Equity: TCS-EQ  |  F&O: NFO exchange")
-        hint.setStyleSheet("color:#555570;font-size:10px;")
+        hint.setStyleSheet("color:#555570;font-size:16px;")
         form.addRow("", hint)
 
         # Exchange
         self.exchange_combo = QComboBox()
-        self.exchange_combo.addItems(["NSE","BSE","NFO","BFO"])
+        self.exchange_combo.addItems(["NFO","NSE","BSE","BFO"])
         self.exchange_combo.currentTextChanged.connect(self._on_exchange_changed)
         form.addRow("Exchange", self.exchange_combo)
 
@@ -499,7 +657,7 @@ class OrderPanel(QWidget):
         self.submit_btn = QPushButton("Place Order")
         self.submit_btn.setFixedHeight(40)
         self.submit_btn.setStyleSheet(
-            "background:#1A5A30;color:#50DD80;border-color:#2A7040;font-weight:bold;font-size:13px;")
+            "background:#1A5A30;color:#50DD80;border-color:#2A7040;font-weight:bold;font-size:16px;")
         self.submit_btn.clicked.connect(self._place_order)
         clear_btn = QPushButton("Clear"); clear_btn.setFixedHeight(40)
         clear_btn.clicked.connect(self._clear_form)
@@ -511,29 +669,22 @@ class OrderPanel(QWidget):
 
         root.addWidget(form_box)   # col 1: order form
 
-        # ── COL 2: Equity list ────────────────────────────────────
-        eq_entries = [f"NSE|{s}|{s}" for s in EQUITY_STOCKS]
-        self._equity_box = StockListBox(f"📈  Equity Stocks  ({len(EQUITY_STOCKS)})", eq_entries)
-        self._equity_box.selected.connect(self._on_stock_selected)
-        root.addWidget(self._equity_box)
-
-        # ── COL 3: F&O list ───────────────────────────────────────
-        self._fno_box = StockListBox(f"📊  F&O  ({len(FNO_SEED)})", FNO_SEED)
-        self._fno_box.selected.connect(self._on_stock_selected)
-        root.addWidget(self._fno_box)
-
-        # ── COL 4: Quick Reference — full height ──────────────────
+        # ── COL 2: Quick Reference sidebar (always expanded) ──────
         qr_box = QGroupBox("ℹ  Quick Reference")
         qr_box.setStyleSheet(
-            "QGroupBox{color:#5090CC;font-weight:bold;font-size:12px;"
-            "border:1px solid #252538;border-radius:6px;margin-top:8px;background:#0A0A14;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:8px;}"
+            "QGroupBox{color:#5090CC;font-weight:bold;font-size:16px;"
+            "border:1px solid #252538;border-radius:8px;margin-top:10px;background:#0A0A14;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:10px;}"
         )
         qr_lay = QVBoxLayout(qr_box)
-        qr_lay.setContentsMargins(8, 14, 8, 8)
+        qr_lay.setContentsMargins(12, 18, 12, 12)
         qr_lbl = QLabel(
-            "<style>body{color:#AAAACC;font-size:11px;line-height:1.7;}"
-            "b{color:#FFF;}.h{color:#5078DC;font-weight:bold;}</style>"
+            "<style>body{color:#AAAACC;font-size:16px;line-height:1.9;}"
+            "b{color:#FFF;font-size:16px;}"
+            ".h{color:#5090CC;font-weight:bold;font-size:16px;"
+            "display:block;margin-top:12px;margin-bottom:4px;"
+            "border-bottom:1px solid #252538;padding-bottom:3px;}"
+            "</style>"
             "<p class='h'>Symbol Format</p>"
             "<b>NSE/BSE equity:</b> TCS-EQ, INFY-EQ<br>"
             "<b>F&amp;O Future:</b> NIFTY25JUN26FUT<br>"
@@ -541,11 +692,11 @@ class OrderPanel(QWidget):
             "<p class='h'>Order Types</p>"
             "<b>MARKET</b> — best price now<br>"
             "<b>LIMIT</b> — your price or better<br>"
-            "<b>SL</b> — stop-loss + limit<br>"
+            "<b>SL</b> — stop-loss + limit price<br>"
             "<b>SL-M</b> — stop-loss at market<br>"
             "<p class='h'>Product</p>"
-            "<b>CNC</b> — delivery (overnight)<br>"
-            "<b>MIS</b> — intraday auto SQ-OFF<br>"
+            "<b>CNC</b> — delivery (hold overnight)<br>"
+            "<b>MIS</b> — intraday, auto square-off<br>"
             "<b>NRML</b> — F&amp;O overnight<br>"
             "<p class='h'>Validity</p>"
             "<b>DAY</b> — valid today only<br>"
@@ -560,8 +711,8 @@ class OrderPanel(QWidget):
         qr_lay.addStretch()
         root.addWidget(qr_box)
 
-        # col proportions: form | equity | fno | quick-ref
-        root.setSizes([380, 280, 280, 180])
+        # Two columns: form | quick ref
+        root.setSizes([560, 320])
 
     # ── Instrument loader ─────────────────────────────────────────
 
@@ -572,20 +723,14 @@ class OrderPanel(QWidget):
         self._inst_loader.start()
 
     def _on_fno_loaded(self, entries: list):
-        self._fno_box.update_entries(entries)
-        fno_syms = [e.split("|")[1] for e in entries if "|" in e]
-        all_syms = list(self._sym_model.stringList()) + fno_syms
+        """Update autocomplete with live futures symbols — no list box."""
+        fut_syms = [e.split("|")[1] for e in entries if "|" in e]
+        all_syms = list(self._sym_model.stringList()) + fut_syms
         self._sym_model.setStringList(sorted(set(all_syms)))
 
     def _on_equity_loaded(self, entries: list):
-        self._equity_box.update_entries(entries)
-        eq_syms = [e.split("|")[1] for e in entries if "|" in e]
-        # Rebuild autocomplete with live equity list
-        existing = list(self._sym_model.stringList())
-        # Remove static equity, keep F&O
-        static_eq = set(EQUITY_STOCKS)
-        non_eq = [s for s in existing if s not in static_eq]
-        self._sym_model.setStringList(sorted(set(eq_syms + non_eq)))
+        """Equity removed — no-op."""
+        pass
 
     # ── Stock selection ───────────────────────────────────────────
 
@@ -618,7 +763,7 @@ class OrderPanel(QWidget):
         self._ltp_timer.start(800)
         self.ltp_badge.setText("LTP  …")
         self.ltp_badge.setStyleSheet(
-            "color:#888899;font-size:11px;padding:3px 6px;"
+            "color:#888899;font-size:16px;padding:3px 6px;"
             "background:#1C1C2A;border:1px solid #353550;border-radius:4px;"
         )
 
@@ -636,7 +781,7 @@ class OrderPanel(QWidget):
         self._ltp = ltp
         self.ltp_badge.setText(f"₹ {ltp:,.2f}")
         self.ltp_badge.setStyleSheet(
-            "color:#40CC70;font-size:11px;font-weight:bold;padding:3px 6px;"
+            "color:#40CC70;font-size:16px;font-weight:bold;padding:3px 6px;"
             "background:#0F2A1A;border:1px solid #1A5A30;border-radius:4px;"
         )
         ot = self.order_type_combo.currentText()
@@ -649,7 +794,7 @@ class OrderPanel(QWidget):
         self._ltp = 0.0
         self.ltp_badge.setText("LTP  N/A")
         self.ltp_badge.setStyleSheet(
-            "color:#FF8800;font-size:11px;padding:3px 6px;"
+            "color:#FF8800;font-size:16px;padding:3px 6px;"
             "background:#2A1A00;border:1px solid #5A3A00;border-radius:4px;"
         )
 
@@ -657,7 +802,7 @@ class OrderPanel(QWidget):
         self._ltp = 0.0
         self.ltp_badge.setText("LTP  —")
         self.ltp_badge.setStyleSheet(
-            "color:#666680;font-size:11px;padding:3px 6px;"
+            "color:#666680;font-size:16px;padding:3px 6px;"
             "background:#1C1C2A;border:1px solid #353550;border-radius:4px;"
         )
 
@@ -744,7 +889,7 @@ class OrderPanel(QWidget):
 
     def _set_status(self, msg: str, error: bool = True):
         color = "#FF6060" if error else "#50DD80"
-        self.status_lbl.setText(f'<span style="color:{color};font-size:12px;">{msg}</span>')
+        self.status_lbl.setText(f'<span style="color:{color};font-size:16px;">{msg}</span>')
 
     def _clear_form(self):
         self.symbol_input.clear()
